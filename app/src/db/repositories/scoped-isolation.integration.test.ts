@@ -846,6 +846,12 @@ const CASES: Case[] = [
       }),
   },
   {
+    // #791: a request id is looked up in the workspace of the scope; a turn of B is never found under A (the delivery id carries the workspace)
+    name: "jobs.findImplementerTurn",
+    run: (a) => a.jobs.findImplementerTurn("request-of-b"),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
     name: "jobs.cancelWaitingForRepository",
     run: (a, b) => a.jobs.cancelWaitingForRepository(b.repository.id),
     expectAnswer: (answer) => expect(answer).toBe(0),

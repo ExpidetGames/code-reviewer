@@ -5,7 +5,8 @@
 //  - `pr_number` is `-slot` of the session. A negative number is never a GitHub pull request, so nothing that acts on real pull
 //    requests (the webhooks) can match it, and the unique index "one running job per (repository, pr_number)" becomes "one
 //    running turn per session".
-//  - `pr_url` is the url of the branch, `head_sha` the tip of the base branch read when the task was accepted. Neither is shown
+//  - `pr_url` is the url of the branch (each part of the name percent-encoded, so `#` and `%` in a name stay in the path),
+//    `head_sha` the tip of the base branch read when the task was accepted. Neither is shown
 //    as pull request data; the consumers that would are gated by the kind (`src/jobs/README.md`, "The implementer kind").
 //  - `command` is `review` and `args` empty: the queue's claim only hands out `review` commands.
 //  - `delivery_id` is `implementer:<workspace id>:<client request id>`. The unique index of the column spans every workspace
@@ -51,7 +52,7 @@ export function implementerJobShape(
     throw new RangeError("The slot of a session starts at 1.");
   return {
     prNumber: -input.slot,
-    prUrl: `${input.repositoryUrl.replace(/\/+$/, "")}/tree/${input.branch}`,
+    prUrl: `${input.repositoryUrl.replace(/\/+$/, "")}/tree/${input.branch.split("/").map(encodeURIComponent).join("/")}`,
     headSha: input.baseSha.toLowerCase(),
     command: "review",
     args: "",

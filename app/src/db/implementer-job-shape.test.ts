@@ -2,7 +2,7 @@
 
 // The one place that writes the pull request columns of a turn's job (#752).
 import { describe, expect, it } from "vitest";
-import { implementerJobShape } from "./job-shape.ts";
+import { implementerJobShape } from "./implementer-job-shape.ts";
 
 const input = {
   workspaceId: "w-1",
@@ -25,6 +25,22 @@ describe("the shape of a turn's job", () => {
       deliveryId: "implementer:w-1:req-1",
     });
   });
+
+  // #755-T05
+  it.each([
+    ["feature/a#b", "feature/a%23b"],
+    ["fix/what?", "fix/what%3F"],
+    ["100%/done", "100%25/done"],
+    ["a b/c+d", "a%20b/c%2Bd"],
+    ["Zürich/ä", "Z%C3%BCrich/%C3%A4"],
+  ])(
+    "encodes the branch %s in the url, keeping the slashes",
+    (branch, encoded) => {
+      expect(implementerJobShape({ ...input, branch }).prUrl).toBe(
+        `https://github.test/acme/widgets/tree/${encoded}`,
+      );
+    },
+  );
 
   // #752-T01
   it.each([0, -1, 1.5, Number.NaN])("refuses the slot %s", (slot) => {

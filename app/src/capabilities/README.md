@@ -17,8 +17,8 @@ Unset, a deployment is exactly today's code-review.com: no new required variable
 such.
 `implementer` (#747) is allowed by the product `factory` only and is in no product's default, so an unset
 `PRODUCT_CAPABILITIES` never turns it on; code-review.com refuses it by name (the code wall). It needs `dynamic-review`
-(and so `review`), and it adds no route, navigation entry or job by itself: those come with later changes of the
-Implementer (#745). The job kind `implementer` is already mapped to it (`CAPABILITY_OF_REVIEW_KIND`), so
+(and so `review`). Its routes are the four behind the task form (`src/implementer/`, #755), classified `implementer` in `routes.ts` and
+asked again in each route file; the navigation entry and the page come with later changes of the Implementer (#745). The job kind `implementer` is already mapped to it (`CAPABILITY_OF_REVIEW_KIND`), so
 `allowsReviewKind("implementer")` is true only in a set that has the capability. A wrong setting stops the start
 (`DEPLOY_CONFIG_INVALID`, `src/deploy/startup.ts`); it names the variable and never repeats an unknown value.
 
