@@ -47,6 +47,7 @@ from urllib.parse import urlsplit
 
 from ..job import JobError
 from ..result import ErrorCode
+from .commit_headers import CommitHeaderReader, HeaderTooLarge
 from .git_process import (
     DEFAULT_TIMEOUT,
     MIN_GIT_VERSION,
@@ -651,23 +652,11 @@ class GitWorkspace:
         the committer is the system identity. The headers are read as they are stored
         (`--format=raw` prints the lines of the object): `%cn` and `%ce` read the last `committer`
         line while other parts of git read the first, so a commit with two of them is refused
-        outright."""
-        listed = self._mirror(
-            [
-                "log",
-                "-z",
-                "--no-show-signature",
-                "--format=raw",
-                f"{self.start_commit}..{tip}",
-            ]
-        )
-        if listed.returncode != 0:
-            raise PushUnverified("the commits of the branch could not be listed (git log)")
+        outright. Only the header block of each commit is read, as a stream: the message is the
+        agent's and can be arbitrarily large (#764)."""
         system = (self.identity.name, self.identity.email)
-        for entry in listed.stdout.split("\0"):
-            if not entry.strip():
-                continue
-            headers = entry.strip("\n").split("\n\n", 1)[0].split("\n")
+
+        def check(headers: list[str]) -> None:
             if not _COMMIT_HEADER.fullmatch(headers[0]):
                 self._violation("a commit of the branch cannot be read")
             sha = headers[0].removeprefix("commit ")
@@ -680,6 +669,25 @@ class GitWorkspace:
             found = _COMMITTER.fullmatch(committers[0])
             if found is None or (found["name"], found["email"]) != system:
                 self._violation(f"commit {sha[:12]} was not committed by the system identity")
+
+        reader = CommitHeaderReader(check)
+        try:
+            listed = self._mirror_stream(
+                [
+                    "log",
+                    "-z",
+                    "--no-show-signature",
+                    "--format=raw",
+                    f"{self.start_commit}..{tip}",
+                ],
+                reader.feed,
+            )
+            if listed.returncode == 0:
+                reader.finish()
+        except HeaderTooLarge:
+            self._violation("a commit of the branch has an absurdly large header")
+        if listed.returncode != 0:
+            raise PushUnverified("the commits of the branch could not be listed (git log)")
 
     def _advance(self, ref: str, tip: str, previous: str | None) -> None:
         """Move the mirror's branch to the verified tip, only if it still is where it was."""
@@ -794,6 +802,15 @@ class GitWorkspace:
             timeout=timeout,
         )
 
+    def _mirror_stream(self, args: list[str], consume: Callable[[bytes], None]) -> Outcome:
+        """`_mirror` for output that is read as a stream and not kept (see `GitProcess.stream`)."""
+        return self._process.stream(
+            ["--git-dir", str(self.mirror), *_MIRROR_OPTIONS, *args],
+            env=self._process.base_environment("file"),
+            consume=consume,
+            timeout=self._timeout,
+        )
+
     def _as_agent(self, args: list[str], *, env: dict[str, str] | None = None) -> Outcome:
         return self._process.run(
             args,
@@ -902,15 +919,17 @@ class PushLoop:
         try:
             result = self._workspace.push()
         except PushUnverified:
-            # Nothing is known against the agent: look again, but not at the next tick.
+            # Nothing is known against the agent: look again, but not at the next tick. The wait
+            # counts from the end of the look: a fetch that hung for 30 s and failed must not be
+            # retried at once because the clock was read before it (#764).
             self._failures += 1
             wait = self._retry_backoff * 2 ** (self._failures - 1)
-            self._retry_at = now + min(self._max_backoff, wait)
+            self._retry_at = self._clock() + min(self._max_backoff, wait)
             return None
         self._failures = 0
         self._retry_at = None
         self._pending = False
-        self._last = now
+        self._last = self._clock()
         return result
 
     def finish(self) -> PushResult:

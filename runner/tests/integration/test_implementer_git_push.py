@@ -11,6 +11,7 @@ import os
 import secrets
 import subprocess
 import threading
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -1212,3 +1213,125 @@ def test_no_background_gc_or_maintenance_is_started_in_the_mirror(rig: Rig) -> N
         workspace.push()
 
     assert not marker.exists(), "a push started git gc --auto in the mirror"
+
+
+# -- the back-off is measured from the end of the failed look (#764, review of #782) ---------
+
+
+# #764-F1
+def test_a_look_that_takes_long_and_fails_waits_from_its_end_not_from_its_start(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    clock = Clock()
+    loop = PushLoop(workspace, interval=0.0, clock=clock, retry_backoff=10.0, max_backoff=120.0)
+    commit(workspace, "a.txt")
+    calls: list[float] = []
+
+    def push() -> object:
+        calls.append(clock.now)
+        clock.now += 40.0  # a fetch that hangs for 40 s and then fails
+        raise PushUnverified("the agent's branch could not be fetched")
+
+    monkeypatch.setattr(workspace, "push", push)
+
+    assert loop.tick() is None
+    assert loop.tick() is None, "the failed look took 40 s, the wait of 10 s starts after it"
+    assert len(calls) == 1
+    clock.now += 9.0
+    assert loop.tick() is None
+    assert len(calls) == 1, "9 s after the end of the look is still inside the wait"
+    clock.now += 2.0
+    loop.tick()
+    assert len(calls) == 2, "the wait is over 11 s after the end of the look"
+
+
+# #764-F1
+def test_a_slow_good_push_spaces_the_next_one_from_its_end(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = rig.prepared()
+    clock = Clock()
+    loop = PushLoop(workspace, interval=120.0, clock=clock)
+    commit(workspace, "a.txt")
+    real_push = workspace.push
+
+    def push() -> object:
+        clock.now += 100.0
+        return real_push()
+
+    monkeypatch.setattr(workspace, "push", push)
+    assert loop.tick() is not None
+    commit(workspace, "b.txt")
+
+    clock.now += 60.0
+    assert loop.tick() is None, "the interval counts from the end of the push that took 100 s"
+
+
+# -- a commit message is not read as a whole (#764, review of #782) ---------------------------
+
+
+HUGE_MESSAGE_BYTES = 24 * 1024 * 1024
+
+
+# #764-F2
+def test_a_huge_commit_message_does_not_fill_the_memory_of_the_check(rig: Rig) -> None:
+    workspace = rig.prepared()
+    commit(workspace, "a.txt")
+    huge = raw_commit(
+        workspace,
+        [f"author {SYSTEM}", f"committer {SYSTEM}"],
+        message=("x" * 99 + "\n") * (HUGE_MESSAGE_BYTES // 100),
+    )
+    bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", huge)
+
+    tracemalloc.start()
+    try:
+        result = workspace.push()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert result.head == huge, "a long message is not a violation"
+    assert peak < HUGE_MESSAGE_BYTES // 4, f"the check held {peak} bytes of a message"
+
+
+# #764-F2
+def test_a_huge_message_does_not_hide_a_forged_committer_after_it(rig: Rig) -> None:
+    workspace = rig.prepared()
+    good = commit(workspace, "a.txt")
+    workspace.push()
+    bypass(
+        workspace,
+        "update-ref",
+        f"refs/heads/{BRANCH}",
+        raw_commit(
+            workspace,
+            [f"author {SYSTEM}", f"committer {SYSTEM}"],
+            message=("y" * 99 + "\n") * 20_000,
+        ),
+    )
+    forged = raw_commit(workspace, [f"author {SYSTEM}", f"committer {ALICE}"], message="fake\n")
+    bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", forged)
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
+    assert raw("rev-parse", f"refs/heads/{BRANCH}", cwd=workspace.mirror, git=rig.git) == good
+
+
+# #764-F2
+def test_a_header_block_that_is_absurdly_large_is_refused(rig: Rig) -> None:
+    workspace = rig.prepared()
+    good = commit(workspace, "a.txt")
+    workspace.push()
+    padding = [f"extra {'z' * 900}"] * 1_500  # about 1.3 MB of header lines
+    bloated = raw_commit(workspace, [f"author {SYSTEM}", f"committer {SYSTEM}", *padding])
+    bypass(workspace, "update-ref", f"refs/heads/{BRANCH}", bloated)
+
+    with pytest.raises(JobError) as refused:
+        workspace.push()
+
+    assert refused.value.code is ErrorCode.BRANCH_VIOLATION
+    assert raw("rev-parse", f"refs/heads/{BRANCH}", cwd=workspace.mirror, git=rig.git) == good
