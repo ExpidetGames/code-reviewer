@@ -7,7 +7,10 @@ engine configuration and environment, the model proxy and ledger, the git worksp
 the push loop and the leftover handling. The user separation is proven by the privileged lane.
 """
 
+import contextlib
 import json
+import socket
+import threading
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, cast
@@ -35,6 +38,8 @@ from opencode_support import ripgrep_binary
 
 from code_reviewer_runner.dynamic_review.passthrough.families import WireFamily
 from code_reviewer_runner.dynamic_review.static_isolation import ImplementerNetwork
+from code_reviewer_runner.implementer.egress_config import EgressSettings, start_egress
+from code_reviewer_runner.implementer.egress_proxy import EgressProxy
 from code_reviewer_runner.implementer.git_workspace import LEFTOVER_MESSAGE
 from code_reviewer_runner.implementer.prompts import LEFTOVER_PROMPT, instructions_text
 from code_reviewer_runner.result import ErrorCode
@@ -596,3 +601,104 @@ def test_a_filled_window_compacts_and_the_turn_goes_on_with_the_cost_right(
             total += cost
         assert result.usage.ai_calls == len(records)
         assert result.usage.cost_usd == pytest.approx(float(total), rel=1e-9)
+
+
+class EchoRegistry:
+    """Where a tunnel of the egress proxy ends: a socket server that answers what it is sent."""
+
+    def __init__(self) -> None:
+        self._listener = socket.socket()
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(8)
+        self.dialled: list[tuple[str, int]] = []
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                client, _ = self._listener.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._echo, args=(client,), daemon=True).start()
+
+    @staticmethod
+    def _echo(client: socket.socket) -> None:
+        with client, contextlib.suppress(OSError):
+            while data := client.recv(65536):
+                client.sendall(b"registry says " + data)
+
+    def connect(self, address: tuple[str, int], timeout: float) -> socket.socket:
+        self.dialled.append(address)
+        return socket.create_connection(self._listener.getsockname(), timeout=timeout)
+
+    def close(self) -> None:
+        self._listener.close()
+
+
+def free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+CONNECT_THROUGH_THE_PROXY = (
+    "python3 -c \"import os,socket,urllib.parse as u; p=u.urlparse(os.environ['HTTPS_PROXY']); "
+    "s=socket.create_connection((p.hostname,p.port),5); "
+    "s.sendall(b'CONNECT {host}:443 HTTP/1.1\\r\\nHost: {host}:443\\r\\n\\r\\n'); "
+    "h=s.recv(4096).split(b'\\r\\n')[0].decode(); s.sendall(b'ping'); "
+    "print(h, '|', s.recv(100).decode())\""
+)
+
+
+# #764-R5
+def test_in_registries_mode_the_session_runs_the_egress_proxy_and_a_tool_request_goes_through_it(
+    tmp_path: Path,
+) -> None:
+    registry = EchoRegistry()
+    port = free_port()
+    proxies: list[EgressProxy] = []
+
+    def start(settings: EgressSettings) -> EgressProxy | None:
+        started = start_egress(
+            settings,
+            resolve=lambda host: ["151.101.0.1"] if host == "registry.npmjs.org" else [],
+            connect=registry.connect,
+        )
+        assert started is not None
+        proxies.append(started)
+        return started
+
+    def script(repo: Path) -> list[Turn]:
+        return [
+            bash(CONNECT_THROUGH_THE_PROXY.format(host="registry.npmjs.org")),
+            bash(CONNECT_THROUGH_THE_PROXY.format(host="example.com")),
+            says("done"),
+        ]
+
+    try:
+        with implementer_turn(
+            tmp_path,
+            script,
+            egress=EgressSettings(ImplementerNetwork.REGISTRIES, port),
+            start_egress=start,
+        ) as turned:
+            (environment,) = turned.spawned
+            first, second = turned.tool_results(turned.requests[-1])
+
+            assert environment["HTTPS_PROXY"] == f"http://127.0.0.1:{port}"
+            assert environment["npm_config_https_proxy"] == f"http://127.0.0.1:{port}"
+            assert "NO_PROXY" not in environment
+            assert "200" in first and "registry says ping" in first, first
+            assert "200" not in second, "a host off the allowlist is refused: " + second
+            (proxy,) = proxies
+            counts = proxy.tunnel_counts()
+            # The tool's own tunnel is in the count (the engine itself may open one more).
+            assert set(counts) == {"registry.npmjs.org"} and counts["registry.npmjs.org"] >= 1
+            assert proxy.refused_counts() == {"not_allowed": 1}
+            assert set(registry.dialled) == {("151.101.0.1", 443)}
+            system = json.dumps(turned.requests[0]["system"])
+            assert "The only network access is to package registries" in system
+    finally:
+        registry.close()
+    with pytest.raises(OSError), socket.create_connection(("127.0.0.1", port), timeout=2):
+        pass  # the proxy is stopped with the turn
