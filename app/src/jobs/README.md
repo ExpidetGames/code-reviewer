@@ -147,7 +147,7 @@ What differs from a review, and why a consumer that assumes a pull request is ga
   70 minutes (`implementerMaxRuntimeMs`, the Dispatcher's 60 plus 10), the other kinds keep 25.
 - **The session.** A job that ends without a report of its run (lease, give-up, never dispatched, no capable runner, refused claim,
   cancelled by its holder) sets the session `idle` (`idleSessionsOfEndedTurns`, called from the sweep that closes usage records and
-  from `complete`), otherwise it would stay `running` for good. A report records the result with `recordTurnResult` (#754).
+  from `complete`), otherwise it would stay `running` for good. A report records the result with `recordTurnResult` in the transaction of `complete` (#754, `runner-api/README.md`).
 - **Pull request consumers.** `cancelWaiting` (project deactivated, review kind changed, pull request closed, draft) never touches the
   kind. `previousReviewedSha` and `attemptedShas` answer nothing for it. The check run reconciler and its sweep skip it (it would
   otherwise fill the sweep's batch for good). A claim refused for the entitlements fails the turn with the code and tells the refusal
