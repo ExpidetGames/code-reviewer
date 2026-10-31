@@ -560,15 +560,21 @@ workspace_id)`, a turn its session and its job by `(session_id, workspace_id)` a
   deployment can be run again (`create-implementer-tables.integration.test.ts` holds a writer open and checks exactly that).
 
 `20261030190000_widen_review_kind_checks_for_implementer` (#752) takes the kind `implementer` into the checks on `usage_records.review_kind` and
-`billing_journal_entries.review_kind` (a turn of the Implementer has a usage record and journal entries of its own kind). It changes nothing else, on the live
+`billing_journal_entries.review_kind` (a turn of the Implementer has a usage record and journal entries of its own kind). It adds one index and changes nothing else, on the live
 database too: the old check is dropped and the wider one added under the same name in one transaction (no moment without a check; `drop constraint if exists`, so it
-can be run again). Both take an exclusive lock on a leaf table (nothing references them, `jobs` is untouched) until the batch commits, so `lock_timeout` is 5 s and
+can be run again). Both take an exclusive lock on a leaf table (nothing references them) until the batch commits, so `lock_timeout` is 5 s and
 `statement_timeout` 30 s for its statements, put back afterwards; a long writer makes it give up with `MIGRATION_FAILED` and the deployment can be run again
 (`widen-review-kind-checks-for-implementer.integration.test.ts`).
+**The index on `jobs`.** Last of all (so that waiting for a leaf table never holds `jobs`) it creates the partial index
+`jobs_ended_after_claim (review_kind, finished_at) where claimed_at is not null` (`if not exists`; `down` drops it). The sweep of `no_capable_runner`
+(`runner-jobs-repository.ts`, `cancelStrandedDynamic`) asks for each waiting Dynamic or Implementer job, under the exclusive gate lock, whether a job of its kind ended
+after a claim within the deadline; with 100 000 jobs and 20 waiting that scan took 888 ms per sweep and, with the index (and `jobs_status_run_after` for the
+`running` half, joined by a BitmapOr), 1.3 ms. Like the unique index of #771 it is a plain `create index`: it blocks writes to `jobs` while it builds and until the
+batch commits, under the same `lock_timeout` (a long writer on `jobs` makes the migration give up and roll the batch back; tested) and `statement_timeout`.
 **In one batch with #771's migration its waits cost the queue too.** The unique index of `20261030140000_create_implementer_sessions_and_turns` is a plain
 `create unique index` on `jobs`: it holds a `SHARE` lock on `jobs` (reads go on, every write waits) until the batch commits, not only while it builds. When both
 migrations are pending, they run in one batch (one transaction), so this migration's two lock waits on `usage_records` and `billing_journal_entries` (up to
-2 x 5 s with `lock_timeout` 5 s, if a long writer holds either) happen while `jobs` is still locked: during them the claims, heartbeats and enqueues of the queue wait as
+2 x 5 s with `lock_timeout` 5 s, if a long writer holds either) happen while `jobs` is still locked by #771's index (its own index on `jobs` comes after them): during them the claims, heartbeats and enqueues of the queue wait as
 well, not only the writers of the two leaf tables. A batch that gives up rolls back, and with it that `SHARE` lock. The window is bounded, and a database that ran #771's
 migration in an earlier deployment does not have it.
 
