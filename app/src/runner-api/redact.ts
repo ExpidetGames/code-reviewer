@@ -5,7 +5,7 @@
 // wrong: strings that look like credentials, and the secrets the app itself holds.
 import "server-only";
 import { maskSecretInText } from "../llm/access.ts";
-import type { RunnerResult } from "./contract.ts";
+import type { ImplementerResult, RunnerResult } from "./contract.ts";
 
 export const REDACTED = "[redacted]";
 
@@ -51,6 +51,28 @@ export function redactText(text: string, secrets: readonly string[]): string {
   return cleaned;
 }
 
+/**
+ * The text of an implementer block that a person or an agent wrote: the summary, the subjects of the commits and the paths of the
+ * files (#754). The shas, the statuses, the flag and the saved agent session are not text of that kind and stay as they are.
+ */
+function redactImplementer(
+  block: ImplementerResult,
+  secrets: readonly string[],
+): ImplementerResult {
+  return {
+    ...block,
+    summary: redactText(block.summary, secrets),
+    commits: block.commits.map((commit) => ({
+      ...commit,
+      subject: redactText(commit.subject, secrets),
+    })),
+    filesChanged: block.filesChanged.map((file) => ({
+      ...file,
+      path: redactText(file.path, secrets),
+    })),
+  };
+}
+
 /** The text fields of a result, cleaned. The structure and the numbers are not touched. */
 export function redactResult(
   result: RunnerResult,
@@ -58,6 +80,9 @@ export function redactResult(
 ): RunnerResult {
   return {
     ...result,
+    ...(result.implementer === undefined
+      ? {}
+      : { implementer: redactImplementer(result.implementer, secrets) }),
     logTail: redactText(result.logTail, secrets),
     errorMessage:
       result.errorMessage === null

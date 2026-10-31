@@ -47,10 +47,38 @@ are the same as for a single workspace.
 ## A managed Dynamic result without a cost (#553)
 
 `finishJob` (`report.ts`, shared by the runner API's `complete` and the Worker API's `result`) stores a Dynamic result of a job on
-the operator's key that claims a success and reports a usage with no cost (`usage.costUsd` null) as `dynamic_accounting_failed`
+the operator's key (and, since #754, of a turn of the Implementer) that claims a success and reports a usage with no cost (`usage.costUsd` null) as `dynamic_accounting_failed`
 (`managed-cost-guard.ts`): a managed run never settles with an unknown cost, and the code is free for the customer. A failure keeps
 the runner's code. On the workspace's own key a null cost is a success whose usage record settles with an unknown cost (minutes
 only in billing).
+
+## The result of a turn of the Implementer (#754)
+
+A turn is a job of the kind `implementer` and finishes through the same `finishJob` as every job. Its result carries the closed
+block `result.implementer` (`ImplementerResult` in the contract; `parseResult` in `requests.ts` reads it with the bounds of the
+schema and the compatibility test requires the same verdict as the contract file). The block is held to the kind of the job
+(`implementer-report.ts`): a job of another kind that sends one is refused (`400 RUNNER_REQUEST_INVALID`, field
+`result.implementer`), and so is a **successful** turn without one. A failed turn may have none (the runner failed before it had a
+repository). A refused report completes nothing and changes nothing.
+
+What happens to a block that is accepted:
+
+- `redactResult` removes the known secrets and the shapes of credentials (git token, LLM key, Worker credential) from the summary,
+  the commit subjects and the file paths. On the operator's key the model ids and the provider are taken out of the summary and the
+  subjects too (`withoutManagedModel`); the paths are the repository's and stay.
+- The queue's `complete` (`runner-jobs-repository.ts`), in the transaction that ends the job, gives the session its result with
+  `recordTurnResult` (`implementer/turn-result.ts`): `head_commit` is the head the block says was **pushed** (never an unpushed one),
+  plus the summary and the saved OpenCode session, and the session is `idle`. A failed turn keeps its block, so a turn that stopped
+  at its cost limit after it pushed is a failed job with visible work. A failure without a block records nothing but the end (the
+  session still becomes `idle`, its fields unchanged).
+- Only the call that ended the job does this. A report with a lost lease (`409`) or one for a job that is settled already (late,
+  repeated, or with another result) changes nothing in the session. A job that ends without any report (lease expired, never
+  dispatched, no capable runner) sets the session `idle` through `idleSessionsOfEndedTurns` (#752).
+- Usage and cost are settled as for Dynamic (`settlementOfOutcome`; the call trace is stored the same way), and a managed native turn
+  that succeeds with an unknown cost is stored as `dynamic_accounting_failed` (`managed-cost-guard.ts`). The members never read the
+  cost of a run on the operator's key: the Runs views take it out (`run-view.ts`), the stored usage keeps it for the settlement.
+- Billing classes of the Implementer's codes are in `billing/outcome.ts`: `agent_gave_up`, `push_rejected`, `branch_violation` and
+  `time_limit_reached` are charged (the agent ran), the codes that end a turn before it are free.
 
 ## Authentication
 

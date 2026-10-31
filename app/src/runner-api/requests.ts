@@ -16,6 +16,7 @@ import type {
   ReleaseRequest,
   VmStartRequest,
   FindingPriority,
+  ImplementerResult,
   ReviewFindings,
   RunnerResult,
   RunnerUsage,
@@ -26,6 +27,8 @@ import {
   CLAIM_FEATURES,
   DEFAULT_LLM_PROVIDERS,
   FINDING_PRIORITIES,
+  IMPLEMENTER_FILE_STATUSES,
+  IMPLEMENTER_RESULT_LIMITS,
   LLM_PROVIDER_ID_PATTERN,
   MAX_FINDING_COUNT,
   MAX_LLM_PROVIDERS,
@@ -546,6 +549,217 @@ function parseFindings(
   return { open, bySeverity, ...(incomplete === true ? { incomplete } : {}) };
 }
 
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+const MAX_COMMIT_SUBJECT_CHARS = 500;
+const MAX_FILE_PATH_CHARS = 4096;
+const MAX_OPENCODE_SESSION_ID_CHARS = 200;
+const MAX_OPENCODE_VERSION_CHARS = 64;
+
+/** The keys of `source` that are not in `allowed`, refused under `prefix`: these objects are closed. */
+function refuseUnknownKeys(
+  check: Checker,
+  source: Record_,
+  allowed: readonly string[],
+  prefix: string,
+): void {
+  for (const key of Object.keys(source))
+    if (!allowed.includes(key)) check.fail(`${prefix}${key}`, "invalid");
+}
+
+function commitSha(
+  check: Checker,
+  source: Record_,
+  key: string,
+  field: string,
+): string | undefined {
+  const value = check.string(source, key, field, { max: 40 });
+  if (value !== undefined && !COMMIT_SHA.test(value))
+    return check.fail(field, "invalid");
+  return value;
+}
+
+/** The commits of an implementer block: closed objects, at most `IMPLEMENTER_RESULT_LIMITS.commits`. */
+function parseImplementerCommits(
+  check: Checker,
+  value: unknown,
+  field: string,
+): ImplementerResult["commits"] | undefined {
+  if (value === undefined) return check.fail(field, "required");
+  if (!Array.isArray(value)) return check.fail(field, "invalid");
+  if (value.length > IMPLEMENTER_RESULT_LIMITS.commits)
+    return check.fail(field, "too_long");
+  const before = check.fields.length;
+  const commits: ImplementerResult["commits"] = [];
+  value.forEach((entry: unknown, index) => {
+    const where = `${field}[${String(index)}]`;
+    if (!isRecord(entry)) {
+      check.fail(where, "invalid");
+      return;
+    }
+    refuseUnknownKeys(check, entry, ["sha", "subject"], `${where}.`);
+    const sha = commitSha(check, entry, "sha", `${where}.sha`);
+    const subject = check.string(entry, "subject", `${where}.subject`, {
+      max: MAX_COMMIT_SUBJECT_CHARS,
+    });
+    if (sha !== undefined && subject !== undefined)
+      commits.push({ sha, subject });
+  });
+  return check.fields.length > before ? undefined : commits;
+}
+
+/** The changed files of an implementer block: closed objects, at most `IMPLEMENTER_RESULT_LIMITS.filesChanged`. */
+function parseImplementerFiles(
+  check: Checker,
+  value: unknown,
+  field: string,
+): ImplementerResult["filesChanged"] | undefined {
+  if (value === undefined) return check.fail(field, "required");
+  if (!Array.isArray(value)) return check.fail(field, "invalid");
+  if (value.length > IMPLEMENTER_RESULT_LIMITS.filesChanged)
+    return check.fail(field, "too_long");
+  const before = check.fields.length;
+  const files: ImplementerResult["filesChanged"] = [];
+  value.forEach((entry: unknown, index) => {
+    const where = `${field}[${String(index)}]`;
+    if (!isRecord(entry)) {
+      check.fail(where, "invalid");
+      return;
+    }
+    refuseUnknownKeys(check, entry, ["path", "status"], `${where}.`);
+    const path = check.string(entry, "path", `${where}.path`, {
+      min: 1,
+      max: MAX_FILE_PATH_CHARS,
+    });
+    const status = entry.status;
+    const statusOk =
+      typeof status === "string" &&
+      (IMPLEMENTER_FILE_STATUSES as readonly string[]).includes(status);
+    if (!statusOk)
+      check.fail(
+        `${where}.status`,
+        status === undefined ? "required" : "invalid",
+      );
+    if (path !== undefined && statusOk)
+      files.push({
+        path,
+        status: status as ImplementerResult["filesChanged"][number]["status"],
+      });
+  });
+  return check.fields.length > before ? undefined : files;
+}
+
+/** The saved agent session of an implementer block: null, or a closed object with both fields. */
+function parseImplementerOpencode(
+  check: Checker,
+  value: unknown,
+  field: string,
+): ImplementerResult["opencode"] | undefined {
+  if (value === undefined) return check.fail(field, "required");
+  if (value === null) return null;
+  if (!isRecord(value)) return check.fail(field, "invalid");
+  const before = check.fields.length;
+  refuseUnknownKeys(check, value, ["sessionId", "version"], `${field}.`);
+  const sessionId = check.string(value, "sessionId", `${field}.sessionId`, {
+    min: 1,
+    max: MAX_OPENCODE_SESSION_ID_CHARS,
+  });
+  const version = check.string(value, "version", `${field}.version`, {
+    min: 1,
+    max: MAX_OPENCODE_VERSION_CHARS,
+  });
+  if (
+    check.fields.length > before ||
+    sessionId === undefined ||
+    version === undefined
+  )
+    return undefined;
+  return { sessionId, version };
+}
+
+/**
+ * The implementer block of a result (#754, `ImplementerResult` in the contract): closed, every field required, the bounds of the
+ * schema. Null or absent is "no block" (a failure before the runner had a repository, and every job that is not a turn). Whether
+ * the job may or must carry one is decided with the job (`implementer-report.ts`).
+ */
+function parseImplementerResult(
+  check: Checker,
+  value: unknown,
+): ImplementerResult | null | undefined {
+  if (value === undefined) return null;
+  const field = "result.implementer";
+  if (!isRecord(value)) return check.fail(field, "invalid");
+  const before = check.fields.length;
+  const prefix = `${field}.`;
+  refuseUnknownKeys(
+    check,
+    value,
+    [
+      "baseCommit",
+      "headCommit",
+      "pushed",
+      "commits",
+      "filesChanged",
+      "summary",
+      "opencode",
+    ],
+    prefix,
+  );
+  const baseCommit = commitSha(
+    check,
+    value,
+    "baseCommit",
+    `${prefix}baseCommit`,
+  );
+  const headCommit =
+    value.headCommit === null
+      ? null
+      : commitSha(check, value, "headCommit", `${prefix}headCommit`);
+  const pushed = value.pushed;
+  if (typeof pushed !== "boolean")
+    check.fail(
+      `${prefix}pushed`,
+      pushed === undefined ? "required" : "invalid",
+    );
+  const commits = parseImplementerCommits(
+    check,
+    value.commits,
+    `${prefix}commits`,
+  );
+  const filesChanged = parseImplementerFiles(
+    check,
+    value.filesChanged,
+    `${prefix}filesChanged`,
+  );
+  const summary = check.string(value, "summary", `${prefix}summary`, {
+    max: IMPLEMENTER_RESULT_LIMITS.summaryChars,
+  });
+  const opencode = parseImplementerOpencode(
+    check,
+    value.opencode,
+    `${prefix}opencode`,
+  );
+  if (
+    check.fields.length > before ||
+    baseCommit === undefined ||
+    headCommit === undefined ||
+    typeof pushed !== "boolean" ||
+    commits === undefined ||
+    filesChanged === undefined ||
+    summary === undefined ||
+    opencode === undefined
+  )
+    return undefined;
+  return {
+    baseCommit,
+    headCommit,
+    pushed,
+    commits,
+    filesChanged,
+    summary,
+    opencode,
+  };
+}
+
 function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   if (!isRecord(value)) return check.fail("result", "invalid");
   const before = check.fields.length;
@@ -604,6 +818,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     check.fail("result.logTruncated", "invalid");
   const usage = parseUsage(check, value.usage);
   const findings = parseFindings(check, value.findings);
+  const implementer = parseImplementerResult(check, value.implementer);
 
   if (
     check.fields.length > before ||
@@ -614,6 +829,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     commentUrl === undefined ||
     usage === undefined ||
     findings === undefined ||
+    implementer === undefined ||
     (errorCode !== null && typeof errorCode !== "string")
   )
     return undefined;
@@ -628,6 +844,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     logTruncated: logTruncated === true,
     usage,
     ...(findings === null ? {} : { findings }),
+    ...(implementer === null ? {} : { implementer }),
   };
 }
 

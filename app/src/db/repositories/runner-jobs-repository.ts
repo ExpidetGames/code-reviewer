@@ -69,6 +69,8 @@ import { headNoticeKey } from "../refusal-notice-key.ts";
 import { claimOldestDueJob } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 import { createUsageRecordsRepository } from "./usage-records-repository.ts";
+import { turnResultOf } from "../../implementer/turn-result.ts";
+import { createImplementerRepository } from "./implementer-repository.ts";
 import { idleSessionsOfEndedTurns } from "./implementer-sessions-sweep.ts";
 import { closeRecordsOfEndedJobs } from "./usage-records-sweep.ts";
 import {
@@ -1226,8 +1228,24 @@ export function createRunnerJobsRepository(
             .executeTakeFirst();
           if (finished !== undefined) {
             endedClaims.push(jobId);
-            // #752: the turn is over; a report that records its result sets the session idle with the result, this only makes
-            // sure it is idle when the job ended with a failure that carried none.
+            // #754: the report of a turn gives its session the result (the pushed head, the summary, the saved agent session)
+            // and sets it idle, in this transaction; a failure without a block records nothing but the end. Only the call that
+            // ended the job gets here: a report that comes late for a settled job, or with a lost lease, changes nothing.
+            if (finished.review_kind === "implementer") {
+              const sessions = createImplementerRepository(
+                trx,
+                finished.workspace_id,
+                now,
+              );
+              const turn = await sessions.getTurnByJob(finished.id);
+              if (turn !== undefined)
+                await sessions.recordTurnResult(
+                  turn.session.id,
+                  turnResultOf(result),
+                );
+            }
+            // #752: the sessions of the other turns that ended without a report of their run are idle by now; this only makes
+            // sure of it.
             await idleSessionsOfEndedTurns(trx, timestamp);
             // Settled from what the runner reported, in the same transaction as the job's end.
             const settlement = settlementOfOutcome(outcome);
