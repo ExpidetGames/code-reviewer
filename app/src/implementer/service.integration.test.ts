@@ -206,6 +206,29 @@ describe("the branches of the form", () => {
     });
   });
 
+  // #755-T02
+  it("asks for the list only after the repository read worked, so no call is left running when the request is answered", async () => {
+    const { h, service, repository } = await startImplementerHarness();
+    h.fake.fail({ pathIncludes: "/repos/acme/widgets", status: 404 });
+    const before = h.fake.requests().length;
+
+    expect(await failureOf(service.listBranches(repository.id))).toMatchObject({
+      code: "IMPLEMENTER_APP_NOT_INSTALLED",
+    });
+
+    // One token, one read: a second call started beside the first would have minted a token of its own.
+    expect(
+      h.fake
+        .requests()
+        .slice(before)
+        .map((request) => `${request.method} ${request.path}`),
+    ).toEqual([
+      "POST /app/installations/4242/access_tokens",
+      "GET /repos/acme/widgets",
+      "DELETE /installation/token",
+    ]);
+  });
+
   // #755-T01
   it("answers not found for a repository of another workspace or nobody, and does not ask GitHub", async () => {
     const { h, service } = await startImplementerHarness();

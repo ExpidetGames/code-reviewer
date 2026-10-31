@@ -198,10 +198,10 @@ export function createImplementerService(
       const { integration, repo } = await resolveRepository(repositoryId);
       const provider = deps.registry.resolve(integration.type);
       try {
-        const [facts, branches] = await Promise.all([
-          provider.getRepositoryFacts(integration, repo),
-          provider.listBranches(integration, repo),
-        ]);
+        // One after the other: with `Promise.all` the second call would keep running (and holding a token and a connection)
+        // after the first one failed and the request was answered.
+        const facts = await provider.getRepositoryFacts(integration, repo);
+        const branches = await provider.listBranches(integration, repo);
         return {
           defaultBranch: facts.defaultBranch,
           branches: branches.names,
