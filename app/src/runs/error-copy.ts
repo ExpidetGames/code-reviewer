@@ -267,14 +267,64 @@ export type ErrorDescription = {
   known: boolean;
 };
 
-/** `stoppedEarly` is the limit the runner reported in the usage of the run (`cost_limit`, `project_cost_limit`), when it did. */
-export function describeErrorCode(
+/**
+ * The sentences of a run of the Implementer (#758). A task is not a review of a pull request: where a sentence of the table
+ * above names a review, a project, a pull request or a later push, or says "nothing was pushed" about a run that may have pushed
+ * commits, the task has its own. Every other code keeps the sentence of the table. The table above is code-review.com's and is
+ * pinned by its golden file; nothing here changes a line of it. A sentence is true for the list (which does not know what the
+ * task pushed) and for the page, which says what was pushed next to it.
+ */
+export const turnErrorCopy = (
+  product: ProductIdentity,
+): Readonly<Record<string, string>> => ({
+  ...errorCopy(product),
+  // The runner reports this code for every way the work could not be kept on its branch, among them a repository that could not
+  // be committed or verified; whatever was pushed before the stop is still on the branch.
+  branch_violation:
+    "The task was stopped because its work could not be kept safely on the branch it was given. Commits pushed before that stay on the branch; nothing after that was saved.",
+  cost_limit_reached: `The task stopped at its cost limit: it sent no further request to the AI model once the calls so far had cost that much. The limit is the one chosen for this task or the maximum cost per task set by ${product.name}, whichever is lower. Work pushed before the stop stays on the branch.`,
+  // The same code serves the Diff Review, the Dynamic Review and a task. The usage could not be settled; the work may be done.
+  dynamic_accounting_failed:
+    "The model usage of this task could not be accounted for, so the task was ended and its cost is not known. The work may be done and pushed: check the branch.",
+  time_limit_reached:
+    "The task reached its time limit and was stopped. Work committed before then was pushed to the branch when possible, so check the branch for what reached it.",
+  // GitHub refuses a push for the repository's rules and also answers a push it cannot take during an outage.
+  push_rejected:
+    "GitHub did not accept the push to the new branch: the repository refused it, or GitHub could not be reached. The work may not be saved there, so check the branch before you start the task again.",
+  // The table above says "Reviews" for a workspace that is paused or has used up its plan; a task is not a review.
+  workspace_suspended:
+    "Tasks are paused for this workspace, so this task did not start and no AI model was used. Ask whoever manages this workspace's plan.",
+  quota_exhausted:
+    "This workspace has used up what its plan allows for the current period, so this task did not start and no AI model was used. Tasks start again when the period renews or the limit is raised.",
+  // The code also covers an engine that stopped after the model was called, and then there is no summary.
+  agent_gave_up:
+    "The agent stopped without a result it could stand behind, or its engine stopped before it could report one. Read its summary, if there is one, then try again with a clearer or smaller task.",
+  // The table above promises a new run on the next push or review request; a task is never run again by itself.
+  no_capable_runner:
+    "No worker that can run tasks picked up this task within the time limit, so it was cancelled. Start it again later.",
+  dispatch_unavailable:
+    "No worker picked up this task within the time limit, so it was stopped. The service that starts workers may be down or fully busy. Start the task again later.",
+  lease_lost:
+    "The worker no longer held this task when it was ready, or this could not be confirmed, so the result was not saved. Work pushed before that stays on the branch.",
+  billing_hold_released:
+    "The credit held for this task was released before it could start, so it did not start and no AI model was used. Start the task again.",
+  reviews_paused:
+    "Work is paused for this workspace for a while, so this task did not start and no AI model was used. Start it again later.",
+  billing_limits_unreadable: `The spending limits of this workspace could not be checked, so this task did not start and no AI model was used. Start it again later. If this keeps happening, ask whoever runs ${product.name}.`,
+  // The model of a task is chosen when it is started, not in the settings of a project.
+  llm_model_unavailable:
+    "The AI model chosen for this task is not available any more, so it did not start and no AI model was used. Start a new task with another model.",
+  llm_provider_unsupported: `The AI provider chosen for this task cannot be used for it, so it did not start and no AI model was used. Start a new task with another model, or ask whoever runs ${product.name}.`,
+  managed_model_unavailable: `The model chosen for this task is not available right now, so it did not start and no AI model was used. Start a new task with another model. If none is available, contact whoever runs ${product.name}.`,
+});
+
+function describe(
+  copy: Readonly<Record<string, string>>,
   product: ProductIdentity,
   code: string,
   stoppedEarly?: string | null,
 ): ErrorDescription {
   const shown = CODE_SHAPE.test(code) ? code : null;
-  const copy = errorCopy(product);
   const unknown = unknownErrorCopy(product);
   if (shown !== null && Object.hasOwn(copy, shown)) {
     const costLimits = costLimitReachedCopy(product);
@@ -294,6 +344,23 @@ export function describeErrorCode(
     };
   }
   return { code: shown, text: unknown, known: false };
+}
+
+/** `stoppedEarly` is the limit the runner reported in the usage of the run (`cost_limit`, `project_cost_limit`), when it did. */
+export function describeErrorCode(
+  product: ProductIdentity,
+  code: string,
+  stoppedEarly?: string | null,
+): ErrorDescription {
+  return describe(errorCopy(product), product, code, stoppedEarly);
+}
+
+/** The sentence for the code of a run of the Implementer (#758); see `turnErrorCopy`. */
+export function describeTurnErrorCode(
+  product: ProductIdentity,
+  code: string,
+): ErrorDescription {
+  return describe(turnErrorCopy(product), product, code);
 }
 
 export type ReasonDescription = {
