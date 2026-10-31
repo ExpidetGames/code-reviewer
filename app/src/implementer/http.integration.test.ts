@@ -127,6 +127,20 @@ describe("the lists of the form over HTTP", () => {
     });
   });
 
+  // #791
+  it("answers an id with a NUL byte (%00 in the address) as an unknown repository, not with a 500", async () => {
+    const { get } = await setup();
+
+    const response = await get(
+      "repositories/a%00b/branches".replace("%00", "\u0000"),
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "IMPLEMENTER_REPOSITORY_NOT_FOUND",
+    });
+  });
+
   // #755-T07
   it("answers the model options the service gives, uncached", async () => {
     const models: ImplementerModels = {
@@ -211,6 +225,40 @@ describe("starting a task over HTTP", () => {
         .select("created_by")
         .executeTakeFirst(),
     ).toEqual({ created_by: "user-1" });
+  });
+
+  // #791
+  it("answers an id with a NUL byte in the body as an unknown repository", async () => {
+    const { post, body, counts } = await setup();
+
+    const response = await post(body({ repositoryId: "a\u0000b" }));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "IMPLEMENTER_REPOSITORY_NOT_FOUND",
+    });
+    expect(await counts()).toEqual({ jobs: 0, sessions: 0, turns: 0 });
+  });
+
+  // #791
+  it("answers 409 IMPLEMENTER_BRANCH_CONFLICT for a folder of an existing branch", async () => {
+    const { h, post, body } = await setup();
+    h.fake.addPullRequest("acme/widgets", {
+      number: 1,
+      title: "x",
+      state: "open",
+      headSha: "1".repeat(40),
+      headRef: "feature",
+      baseRef: "main",
+      author: { login: "alice", id: 1 },
+    });
+
+    const response = await post(body({ branch: "feature/new" }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "IMPLEMENTER_BRANCH_CONFLICT",
+    });
   });
 
   // #755-T04

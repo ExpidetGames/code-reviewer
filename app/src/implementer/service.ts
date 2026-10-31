@@ -3,9 +3,10 @@
 // The server side of "send off a task" (#755, part of #745): which repositories, which branches and which models a person can
 // pick, and the submit. It follows the pattern of `manual-reviews` (service, http, errors, shared). The browser names ids and
 // words; the workspace's own rows and the platform decide, in this order: the body is valid, the repository is this
-// workspace's and its integration is active, the installation has accepted the permission to write contents, the repository
+// workspace's and its integration is active (before all of it: a request that was accepted before is answered with what it
+// made, #791), the installation has accepted the permission to write contents, the repository
 // path still resolves (`getRepositoryFacts`, which `getBranch` needs before a null can be believed), the base branch exists,
-// the new branch does not, the model is one the claim would run, the cost limit is within the operator's maximum. Then one
+// the new branch does not exist and is no folder or file of a listed one, the model is one the claim would run, the cost limit is within the operator's maximum. Then one
 // transaction writes the session, the turn and the job (`queue.enqueueImplementerTurn`), and the queue wakes the Dispatcher.
 // Nothing is written before the last step, and a platform that cannot be asked ends the submit with 503.
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
@@ -19,6 +20,7 @@ import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { Integration, RepoRef } from "../integrations/types.ts";
 import { JobQueueError } from "../jobs/errors.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
+import { branchConflict } from "./branch-name.ts";
 import { ImplementerError } from "./errors.ts";
 import type { ImplementerModels, ModelOptions } from "./models.ts";
 import { validateStartInput } from "./start-input.ts";
@@ -66,7 +68,7 @@ export type ImplementerServiceDependencies = {
   integrations: Pick<IntegrationsRepository, "get" | "list">;
   registry: Pick<IntegrationRegistry, "resolve">;
   models: ImplementerModels;
-  queue: Pick<JobQueue, "enqueueImplementerTurn">;
+  queue: Pick<JobQueue, "enqueueImplementerTurn" | "findImplementerTurn">;
   /** The operator's maximum cost per turn in whole US cents, read for each call. */
   operatorCostLimitCents(): Promise<number>;
   /** One line per started task; never carries the instruction, a model or a token. */
@@ -94,6 +96,12 @@ const BRANCH_EXISTS = () =>
   new ImplementerError(
     "IMPLEMENTER_BRANCH_EXISTS",
     "A branch or an earlier task of this repository already has this branch name. Choose a new branch name.",
+  );
+
+const BRANCH_CONFLICT = () =>
+  new ImplementerError(
+    "IMPLEMENTER_BRANCH_CONFLICT",
+    "A branch name cannot be a folder of another branch (foo and foo/bar), and a branch of this repository already has such a name. Choose a new branch name.",
   );
 
 /** The codes of an access failure that mean the app has no (more) access to the connection or the repository. */
@@ -136,6 +144,8 @@ export function createImplementerService(
         "IMPLEMENTER_REQUEST_INVALID",
         "The repository id is missing or malformed.",
       );
+    // Postgres refuses a NUL in text (22021) and the request would end in a 500: no row has such an id, so it is an unknown id.
+    if (repositoryId.includes("\u0000")) throw NOT_FOUND();
     const repository = await deps.repositories.get(repositoryId);
     if (repository === undefined || !repository.active) throw NOT_FOUND();
     const integration = await deps.integrations.get(repository.integrationId);
@@ -224,6 +234,19 @@ export function createImplementerService(
         );
       const task = checked.value;
 
+      // A request that was accepted before is answered with what it made, before anything else is asked: a retry after a lost
+      // answer, a reconnect, the second tab. Minutes later the agent may have pushed the branch, and the branch check below
+      // would call the person's own task "the branch exists" and have them start a second, paid one.
+      const earlier = await deps.queue.findImplementerTurn(
+        task.clientRequestId,
+      );
+      if (earlier !== undefined)
+        return {
+          runId: earlier.job.id,
+          sessionId: earlier.session.id,
+          created: false,
+        };
+
       const { integration, repo } = await resolveRepository(task.repositoryId);
       const provider = deps.registry.resolve(integration.type);
 
@@ -252,6 +275,10 @@ export function createImplementerService(
         baseSha = base.sha;
         if ((await provider.getBranch(integration, repo, task.branch)) !== null)
           throw BRANCH_EXISTS();
+        // Git holds `foo` or `foo/bar`, not both. What the read can tell: the first 100 branches the platform lists.
+        const listed = await provider.listBranches(integration, repo);
+        if (branchConflict(task.branch, listed.names) !== null)
+          throw BRANCH_CONFLICT();
       } catch (error) {
         throw platformFailure(error);
       }

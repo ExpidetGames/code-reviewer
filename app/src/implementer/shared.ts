@@ -30,8 +30,13 @@ import {
 
 /**
  * The 404 of a path that does not exist, in a deployment without the capability `implementer`. The access proxy answers such a
- * path first (src/capabilities/); this is the second wall for a request that reaches a route file anyway, so a deployment
- * without the capability (code-review.com) hands out nothing. Called before the session or the database is asked.
+ * path first (src/capabilities/), with the platform's own 404 page, byte for byte the one of a path that does not exist; this is
+ * the second wall for a request that reaches a route file anyway, so a deployment without the capability (code-review.com) hands
+ * out nothing. Called before the session or the database is asked.
+ *
+ * The limit of this second wall: `notFound()` in a route handler answers an empty 404, not the HTML page of an unknown path. It
+ * is reachable only past the proxy (the proxy matcher leaves the route files no gap today), and its answer still carries no
+ * data; the byte-for-byte equality is the proxy's and is proved in the hosted lane (e2e/hosted/capabilities.e2e.ts).
  */
 export function requireImplementerCapability(): void {
   if (!getCapabilities().has("implementer")) notFound();

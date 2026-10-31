@@ -6,13 +6,21 @@
 // rule has a stable code, so the form can say which one a name breaks. Pure; imports nothing.
 
 export const BRANCH_NAME_MAX_LENGTH = 200;
+/**
+ * The most UTF-8 bytes of one part between slashes. A file name holds 255 bytes on the file systems git runs on, and git makes
+ * `<name>.lock` beside the ref (5 more), so a part of 241 to 250 bytes cannot be created either; 240 leaves a margin. Characters
+ * are not bytes: 150 times `ä` is 150 characters and 300 bytes.
+ */
+export const BRANCH_COMPONENT_MAX_BYTES = 240;
 
 export const BRANCH_NAME_ISSUES = [
   /** Nothing, or only white space. */
   "empty",
   /** More than `BRANCH_NAME_MAX_LENGTH` characters. */
   "too_long",
-  /** A space, control character, `~ ^ : ? * [` or a backslash. */
+  /** A part between slashes of more than `BRANCH_COMPONENT_MAX_BYTES` UTF-8 bytes. */
+  "component_too_long",
+  /** White space of any kind (`\\s`: NBSP, line and paragraph separators, the byte order mark too), a control character, `~ ^ : ? * [` or a backslash. */
   "forbidden_character",
   /** `..` anywhere. */
   "double_dot",
@@ -40,8 +48,9 @@ export type BranchNameIssue = (typeof BRANCH_NAME_ISSUES)[number];
 export type BranchNameCheck =
   { ok: true; value: string } | { ok: false; issue: BranchNameIssue };
 
-// Space, ASCII control characters (git: below 0x20, and DEL), and the characters git refuses in a ref name.
-const FORBIDDEN = /[\u0000- \u007f~^:?*[\\]/;
+// White space of every kind (`\s`, the class the queue refuses too: `jobs/job-input.ts` BRANCH_NAME), ASCII control characters
+// (git: below 0x20, and DEL), and the characters git refuses in a ref name.
+const FORBIDDEN = /[\s\u0000-\u001f\u007f~^:?*[\\]/;
 
 /** The first rule `name` breaks, or the name itself. `base` is the branch the task starts from. */
 export function checkBranchName(name: string, base: string): BranchNameCheck {
@@ -60,6 +69,13 @@ export function checkBranchName(name: string, base: string): BranchNameCheck {
   const parts = name.split("/");
   if (parts.some((part) => part.startsWith(".")))
     return refuse("component_leading_dot");
+  const encoder = new TextEncoder();
+  if (
+    parts.some(
+      (part) => encoder.encode(part).length > BRANCH_COMPONENT_MAX_BYTES,
+    )
+  )
+    return refuse("component_too_long");
   if (name.endsWith(".lock")) return refuse("lock_suffix");
   if (parts.some((part) => part.endsWith(".lock")))
     return refuse("component_lock_suffix");
@@ -67,4 +83,22 @@ export function checkBranchName(name: string, base: string): BranchNameCheck {
   if (name === "@" || name === "HEAD") return refuse("reserved_name");
   if (name === base) return refuse("same_as_base");
   return { ok: true, value: name };
+}
+
+/**
+ * A branch of `existing` that cannot live beside the new `name`, or null. Git holds a name as a file or as a folder, never both:
+ * `foo` and `foo/bar` exclude each other, whichever is made second fails. `existing` is what the platform lists, which is the
+ * first 100 branches of a repository: a conflict with a branch beyond them is not seen here (git finds it at the push). The same
+ * name is no conflict of this kind (the branch exists, which is another refusal).
+ */
+export function branchConflict(
+  name: string,
+  existing: readonly string[],
+): string | null {
+  for (const other of existing) {
+    if (other === name) continue;
+    if (name.startsWith(`${other}/`) || other.startsWith(`${name}/`))
+      return other;
+  }
+  return null;
 }

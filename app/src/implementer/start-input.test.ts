@@ -131,6 +131,11 @@ describe("the body that starts a task", () => {
     [{ entryId: "e", extra: 1 }, "invalid"],
     [{ entryId: "x".repeat(201) }, "invalid"],
     [["entry-1"], "invalid"],
+    // #791: Postgres refuses a NUL in text, and the model fields reach queries.
+    [{ entryId: "a\u0000b" }, "invalid"],
+    [{ provider: "p\u0000", model: "m" }, "invalid"],
+    [{ provider: "p", model: "\u0000m" }, "invalid"],
+    [{ entryId: "tab\there" }, "invalid"],
   ])("refuses the model %j: %s", (model, code) => {
     expect(issuesOf({ ...VALID, model })).toEqual([{ field: "model", code }]);
   });

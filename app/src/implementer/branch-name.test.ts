@@ -3,9 +3,15 @@
 // The rules of a new branch name (#755): `git check-ref-format --branch`, plus the ones of this product (not the base branch,
 // at most 200 characters). Pure.
 import { execFileSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { BRANCH_NAME } from "../jobs/job-input.ts";
 import {
+  BRANCH_COMPONENT_MAX_BYTES,
   BRANCH_NAME_MAX_LENGTH,
+  branchConflict,
   checkBranchName,
   type BranchNameIssue,
 } from "./branch-name.ts";
@@ -24,6 +30,8 @@ const VALID: string[] = [
   "with#hash",
   "dot.in.middle",
   "x".repeat(BRANCH_NAME_MAX_LENGTH),
+  "ä".repeat(BRANCH_COMPONENT_MAX_BYTES / 2),
+  "d/" + "€".repeat(BRANCH_COMPONENT_MAX_BYTES / 3) + "/e",
   "{braces}",
   "tilde-at-end-ok-1",
 ];
@@ -60,6 +68,18 @@ const INVALID: [string, BranchNameIssue][] = [
   ["@", "reserved_name"],
   ["HEAD", "reserved_name"],
   ["x".repeat(BRANCH_NAME_MAX_LENGTH + 1), "too_long"],
+  // #791: a path component holds 255 bytes on the file systems git runs on, and git also makes `<name>.lock`.
+  ["ä".repeat(121), "component_too_long"],
+  ["feature/" + "ä".repeat(121), "component_too_long"],
+  ["a/" + "ß".repeat(121) + "/b", "component_too_long"],
+  ["€".repeat(81), "component_too_long"],
+  // #791: the queue refuses `\s` (NBSP, line separators, the byte order mark, ...); the form says why.
+  ["no\u00a0break", "forbidden_character"],
+  ["line\u2028separator", "forbidden_character"],
+  ["para\u2029separator", "forbidden_character"],
+  ["bom\ufeffhere", "forbidden_character"],
+  ["ideographic\u3000space", "forbidden_character"],
+  ["thin\u2009space", "forbidden_character"],
 ];
 
 describe("the rules of a new branch name", () => {
@@ -114,7 +134,14 @@ describe("the rules of a new branch name", () => {
     };
     const disagreements = [
       ...VALID.map((name) => ({ name, expected: true })),
-      ...INVALID.filter(([name]) => name.length <= 255).map(([name]) => ({
+      ...INVALID.filter(
+        ([name, issue]) =>
+          name.length <= 255 &&
+          // Rules of this product that `git check-ref-format` does not have: the bytes of a part (a file name limit, not syntax)
+          // and the white space beyond ASCII (git takes NBSP; the queue and the form do not).
+          issue !== "component_too_long" &&
+          !(issue === "forbidden_character" && /[\u0080-\uffff]/.test(name)),
+      ).map(([name]) => ({
         name,
         expected: false,
       })),
@@ -130,5 +157,147 @@ describe("the rules of a new branch name", () => {
       )
       .filter(({ name, expected }) => gitAccepts(name) !== expected);
     expect(disagreements).toEqual([]);
+  });
+});
+
+describe("the rules and the queue's", () => {
+  // #791: a name that passes here must pass the queue's `BRANCH_NAME`, otherwise GitHub is asked and the submit then fails with a
+  // bare IMPLEMENTER_REQUEST_INVALID and no issue.
+  it("accepts no character the queue refuses, over the whole basic plane", () => {
+    const disagreements: string[] = [];
+    for (let code = 0; code <= 0xffff; code += 1) {
+      const name = `a${String.fromCharCode(code)}b`;
+      if (checkBranchName(name, "main").ok && !BRANCH_NAME.test(name))
+        disagreements.push(`U+${code.toString(16).padStart(4, "0")}`);
+    }
+    expect(disagreements).toEqual([]);
+  });
+
+  it("accepts no name the queue refuses, whatever its length", () => {
+    for (const name of [
+      "x".repeat(BRANCH_NAME_MAX_LENGTH),
+      "ä".repeat(BRANCH_COMPONENT_MAX_BYTES / 2),
+    ])
+      expect(BRANCH_NAME.test(name)).toBe(true);
+  });
+});
+
+describe("a branch name and the branches that are there", () => {
+  // #791
+  it.each([
+    ["foo/bar", ["foo"], "foo"],
+    ["a/b/c", ["x", "a/b"], "a/b"],
+    ["a/b/c", ["a"], "a"],
+    ["foo", ["foo/bar"], "foo/bar"],
+    ["a/b", ["other", "a/b/c/d"], "a/b/c/d"],
+  ])("sees that %s conflicts with %j: %s", (name, existing, conflict) => {
+    expect(branchConflict(name, existing)).toBe(conflict);
+  });
+
+  // #791
+  it.each([
+    ["foo/bar", ["foo/baz", "foobar", "foo2", "bar"]],
+    ["foo", ["foobar", "fo", "foo.x", "bar/foo"]],
+    ["a/b", ["a/c", "a/bb", "b"]],
+    // The same name is no conflict of folders: the branch exists, which is another refusal.
+    ["foo", ["foo"]],
+    ["foo", []],
+  ])("sees no conflict of %s with %j", (name, existing) => {
+    expect(branchConflict(name, existing)).toBeNull();
+  });
+});
+
+describe("the rules against the real git", () => {
+  let repository: string;
+  beforeAll(() => {
+    repository = mkdtempSync(join(tmpdir(), "cr-755-git-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: repository, stdio: "ignore" });
+    git("init", "-q", "-b", "main");
+    git(
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.test",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "base",
+    );
+  });
+  afterAll(() => {
+    rmSync(repository, { recursive: true, force: true });
+  });
+
+  /** What the runner does: a new branch at the base. */
+  const gitCreates = (name: string): boolean => {
+    try {
+      execFileSync("git", ["checkout", "-q", "-b", name], {
+        cwd: repository,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["checkout", "-q", "main"], {
+        cwd: repository,
+        stdio: "ignore",
+      });
+      execFileSync("git", ["branch", "-q", "-D", name], {
+        cwd: repository,
+        stdio: "ignore",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // #791
+  it("creates every name of the rules that is accepted, the longest components included (with their `.lock` file)", () => {
+    const failed = VALID.filter(
+      (name) => checkBranchName(name, "main").ok && !gitCreates(name),
+    );
+    expect(failed).toEqual([]);
+  });
+
+  // #791
+  it("shows why the limit is in bytes: git cannot create a branch that is under 200 characters and over 255 bytes", () => {
+    for (const name of ["ä".repeat(150), "feature/" + "ä".repeat(130)]) {
+      expect(name.length).toBeLessThanOrEqual(BRANCH_NAME_MAX_LENGTH);
+      expect(gitCreates(name), name.length.toString()).toBe(false);
+      expect(checkBranchName(name, "main")).toEqual({
+        ok: false,
+        issue: "component_too_long",
+      });
+    }
+  });
+
+  // #791
+  it("agrees on folder and file: where the rules see a conflict git cannot create the branch, where they see none it can", () => {
+    const pairs: Array<[string, string[]]> = [
+      ["foo/bar", ["foo"]],
+      ["foo", ["foo/bar"]],
+      ["a/b/c", ["a/b"]],
+      ["foo/baz", ["foo/bar"]],
+      ["foobar", ["foo"]],
+    ];
+    for (const [name, existing] of pairs) {
+      const created: string[] = [];
+      for (const other of existing) {
+        execFileSync("git", ["branch", other], {
+          cwd: repository,
+          stdio: "ignore",
+        });
+        created.push(other);
+      }
+      const conflict = branchConflict(name, existing);
+      expect(gitCreates(name), `${name} beside ${existing.join(",")}`).toBe(
+        conflict === null,
+      );
+      for (const other of created)
+        execFileSync("git", ["branch", "-D", "-q", other], {
+          cwd: repository,
+          stdio: "ignore",
+        });
+    }
   });
 });

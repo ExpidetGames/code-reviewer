@@ -129,6 +129,15 @@ export type JobsRepository = {
   enqueueImplementerTurn(
     input: EnqueueImplementerTurnInput,
   ): Promise<EnqueueImplementerTurnResult>;
+  /**
+   * The turn a client request id made earlier (its job's delivery id is `implementer:<workspace id>:<client request id>`), or
+   * undefined. Writes nothing and asks nothing of the platform: the service looks here first, so a retry minutes after the
+   * agent pushed the branch gets the first task back and not "the branch exists". Not subject to `kindAllowed`: a deployment
+   * without the capability has no such turn.
+   */
+  findImplementerTurn(
+    clientRequestId: string,
+  ): Promise<EnqueueImplementerTurnResult | undefined>;
   /** Cancels every waiting job of a repository (its project was deactivated); returns how many. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
   /**
@@ -268,6 +277,34 @@ export function createJobsRepository(
     options.reviewKind ?? createStoredReviewKindResolver(workspaceId, now);
   const dynamicReviewAllowed =
     options.dynamicReviewEnabled ?? createInstanceDynamicReviewGate();
+
+  // The turn a repeated request made, by the delivery id of its job. Looked up before `createSessionWithTurn`: a job handed back
+  // from its callback is refused there (`IMPLEMENTER_JOB_MISMATCH`) and rolled back, so a repeat must never get that far; and
+  // by the service before it asks the platform anything.
+  async function findImplementerTurn(
+    clientRequestId: string,
+  ): Promise<EnqueueImplementerTurnResult | undefined> {
+    const row = await db
+      .selectFrom("jobs")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .where(
+        "delivery_id",
+        "=",
+        implementerDeliveryId(workspaceId, clientRequestId),
+      )
+      .executeTakeFirst();
+    if (row === undefined) return undefined;
+    const found = await createImplementerRepository(
+      db,
+      workspaceId,
+      now,
+      newId,
+    ).getTurnByJob(row.id);
+    // A job with this delivery id that is no turn cannot be: the id has the prefix only turns write. Not an answer.
+    if (found === undefined) return undefined;
+    return { status: "existing", job: toJob(row), ...found };
+  }
 
   // A transaction cannot start another one; inside one, just use it.
   function inTransaction<T>(
@@ -607,6 +644,9 @@ export function createJobsRepository(
       });
     },
 
+    findImplementerTurn: (clientRequestId) =>
+      findImplementerTurn(clientRequestId),
+
     async enqueueImplementerTurn(input) {
       // Before anything is read or written: a deployment without the capability never has a turn, not even an answer to a repeat.
       if (options.kindAllowed?.("implementer") === false)
@@ -614,33 +654,7 @@ export function createJobsRepository(
           "JOB_KIND_UNAVAILABLE",
           "This deployment has no capability for review kind implementer.",
         );
-      const deliveryId = implementerDeliveryId(
-        workspaceId,
-        input.clientRequestId,
-      );
-      // The turn a repeated request made. Looked up before `createSessionWithTurn`: a job handed back from its callback is refused
-      // there (`IMPLEMENTER_JOB_MISMATCH`) and rolled back, so a repeat must never get that far.
-      const existingTurn = async (): Promise<
-        EnqueueImplementerTurnResult | undefined
-      > => {
-        const row = await db
-          .selectFrom("jobs")
-          .selectAll()
-          .where("workspace_id", "=", workspaceId)
-          .where("delivery_id", "=", deliveryId)
-          .executeTakeFirst();
-        if (row === undefined) return undefined;
-        const found = await createImplementerRepository(
-          db,
-          workspaceId,
-          now,
-          newId,
-        ).getTurnByJob(row.id);
-        // A job with this delivery id that is no turn cannot be: the id has the prefix only turns write. Not an answer.
-        if (found === undefined) return undefined;
-        return { status: "existing", job: toJob(row), ...found };
-      };
-      const repeated = await existingTurn();
+      const repeated = await findImplementerTurn(input.clientRequestId);
       if (repeated !== undefined) return repeated;
 
       const task: NewImplementerTask = {

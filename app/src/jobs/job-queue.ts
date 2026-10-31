@@ -16,6 +16,7 @@ import type { WorkspaceId } from "../db/workspace-scope.ts";
 import { errorCode, FOREIGN_KEY_VIOLATION } from "../db/errors.ts";
 import { JobQueueError } from "./errors.ts";
 import {
+  CLIENT_REQUEST_ID,
   validateEnqueueInput,
   validateImplementerTurnInput,
 } from "./job-input.ts";
@@ -62,6 +63,13 @@ export type JobQueue = {
   enqueueImplementerTurn(
     input: EnqueueImplementerTurnInput,
   ): Promise<EnqueueImplementerTurnResult>;
+  /**
+   * The turn a client request id made earlier, or undefined; reads only (#791). A request id that is no valid id (not 1 to 200
+   * printable ASCII characters) has made no turn.
+   */
+  findImplementerTurn(
+    clientRequestId: string,
+  ): Promise<EnqueueImplementerTurnResult | undefined>;
   /** Cancels all waiting jobs of a repository (project deactivated); running jobs finish. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
   /**
@@ -159,6 +167,10 @@ export function createJobQueue(
         }
       return result;
     },
+    findImplementerTurn: (clientRequestId) =>
+      CLIENT_REQUEST_ID.test(clientRequestId)
+        ? jobs.findImplementerTurn(clientRequestId)
+        : Promise.resolve(undefined),
     cancelWaitingForRepository: (repositoryId) =>
       jobs.cancelWaitingForRepository(repositoryId),
     cancelWaitingForReviewKindChange: (repositoryId) =>

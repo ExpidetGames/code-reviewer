@@ -26,6 +26,11 @@ export const IMPLEMENTER_ERROR_CODES = [
    * starts keeps its name (accepted for the first slice), so the person needs a new branch name then. 409.
    */
   "IMPLEMENTER_BRANCH_EXISTS",
+  /**
+   * The new name is a folder of a branch that exists, or a branch of the repository is a folder of the new name (git holds a
+   * name as a file or as a folder, not both: `foo` and `foo/bar`). Found in the first 100 branches the platform lists. 409.
+   */
+  "IMPLEMENTER_BRANCH_CONFLICT",
   /** The model is not one the claim would run (`reason` says why). 422. */
   "IMPLEMENTER_MODEL_NOT_ALLOWED",
   /** The cost limit is above the operator's maximum per turn; the answer carries `maximumCents`. 422. */
@@ -49,6 +54,7 @@ export const IMPLEMENTER_ERROR_STATUS: Record<
   IMPLEMENTER_WRITE_NOT_GRANTED: 409,
   IMPLEMENTER_BASE_BRANCH_NOT_FOUND: 404,
   IMPLEMENTER_BRANCH_EXISTS: 409,
+  IMPLEMENTER_BRANCH_CONFLICT: 409,
   IMPLEMENTER_MODEL_NOT_ALLOWED: 422,
   EXCEEDS_OPERATOR_MAXIMUM: 422,
   IMPLEMENTER_GITHUB_UNAVAILABLE: 503,

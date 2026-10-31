@@ -82,6 +82,23 @@ describe("the repositories of the form", () => {
     expect((await service.listRepositories()).repositories).toEqual([]);
   });
 
+  // #791
+  it("does not list the repositories of a disabled or disconnected integration, though they are still active", async () => {
+    const { h, service, integration } = await startImplementerHarness();
+    expect((await service.listRepositories()).repositories).toHaveLength(1);
+
+    for (const status of ["disabled", "disconnected"] as const) {
+      await h.integrations.setStatus(integration.id, status);
+      // The repository row is still active: only the integration says it is not usable.
+      expect(
+        (await h.repositories.list({ active: true })).map((r) => r.fullName),
+      ).toEqual(["acme/widgets"]);
+      expect((await service.listRepositories()).repositories, status).toEqual(
+        [],
+      );
+    }
+  });
+
   // #755-T01
   it("asks the platform once for each installation, however many repositories it has", async () => {
     const { h, service, integration } = await startImplementerHarness();
@@ -599,6 +616,171 @@ describe("starting a task", () => {
     expect(check).toHaveBeenCalledWith({
       provider: "deepseek",
       model: "deepseek-chat",
+    });
+  });
+
+  // #791
+  it("hands the first task back for a retry after the branch was pushed, without asking GitHub, and writes nothing", async () => {
+    const { h, service, body, counts } = await startImplementerHarness();
+    const first = await service.startTask(USER, body());
+    // The agent pushed the branch in the meantime.
+    h.fake.addPullRequest("acme/widgets", {
+      number: 1,
+      title: "x",
+      state: "open",
+      headSha: "1".repeat(40),
+      headRef: "implementer/abc123",
+      baseRef: "main",
+      author: { login: "alice", id: 1 },
+    });
+    const before = h.fake.requests().length;
+    const rows = await counts();
+
+    const again = await service.startTask(USER, body());
+
+    expect(again).toEqual({ ...first, created: false });
+    expect(h.fake.requests()).toHaveLength(before);
+    expect(await counts()).toEqual(rows);
+  });
+
+  // #791
+  it("still refuses another request for the branch of a task that is running, and a retry of a request of another workspace is no repeat", async () => {
+    const { h, service, body, counts } = await startImplementerHarness();
+    await service.startTask(USER, body());
+    h.fake.addPullRequest("acme/widgets", {
+      number: 1,
+      title: "x",
+      state: "open",
+      headSha: "1".repeat(40),
+      headRef: "implementer/abc123",
+      baseRef: "main",
+      author: { login: "alice", id: 1 },
+    });
+
+    expect(
+      await failureOf(
+        service.startTask(USER, body({ clientRequestId: "request-2" })),
+      ),
+    ).toMatchObject({ code: "IMPLEMENTER_BRANCH_EXISTS" });
+    expect(await counts()).toEqual({ jobs: 1, sessions: 1, turns: 1 });
+  });
+
+  // #791
+  it("answers an id with a NUL byte as an unknown id, in the body and in the address, without asking Postgres or GitHub", async () => {
+    const { h, service, body, counts } = await startImplementerHarness();
+    const before = h.fake.requests().length;
+
+    for (const repositoryId of [
+      "a\u0000b",
+      "\u0000",
+      "x".repeat(20) + "\u0000",
+    ]) {
+      expect(
+        await failureOf(service.startTask(USER, body({ repositoryId }))),
+      ).toMatchObject({ code: "IMPLEMENTER_REPOSITORY_NOT_FOUND" });
+      expect(await failureOf(service.listBranches(repositoryId))).toMatchObject(
+        { code: "IMPLEMENTER_REPOSITORY_NOT_FOUND" },
+      );
+    }
+    expect(h.fake.requests()).toHaveLength(before);
+    expect(await counts()).toEqual({ jobs: 0, sessions: 0, turns: 0 });
+  });
+
+  // #791
+  it("refuses a model with a NUL byte in it before any query is made", async () => {
+    const check = vi.fn(async () => null);
+    const { service, body } = await startImplementerHarness({
+      models: { ...ALLOW_ALL, check },
+    });
+
+    for (const model of [
+      { entryId: "a\u0000b" },
+      { provider: "deepseek", model: "m\u0000" },
+      { provider: "d\u0000", model: "m" },
+    ])
+      expect(
+        await failureOf(service.startTask(USER, body({ model }))),
+      ).toMatchObject({
+        code: "IMPLEMENTER_REQUEST_INVALID",
+        issues: [{ field: "model" }],
+      });
+    expect(check).not.toHaveBeenCalled();
+  });
+
+  describe("a folder and a file of branches", () => {
+    const branch = (name: string) => ({
+      number: 1,
+      title: "x",
+      state: "open" as const,
+      headSha: "1".repeat(40),
+      headRef: name,
+      baseRef: "main",
+      author: { login: "alice", id: 1 },
+    });
+
+    // #791
+    it.each([
+      ["feature/new", "feature"],
+      ["feature", "feature/old"],
+      ["a/b/c", "a/b"],
+    ])(
+      "refuses %s while %s exists with IMPLEMENTER_BRANCH_CONFLICT, before the model is looked at, and writes nothing",
+      async (name, existing) => {
+        const check = vi.fn(async () => null);
+        const { h, service, body, counts } = await startImplementerHarness({
+          models: { ...ALLOW_ALL, check },
+        });
+        h.fake.addPullRequest("acme/widgets", branch(existing));
+
+        const error = await failureOf(
+          service.startTask(USER, body({ branch: name })),
+        );
+
+        expect(error).toMatchObject({ code: "IMPLEMENTER_BRANCH_CONFLICT" });
+        expect((error as Error).message).toMatch(/new branch name/i);
+        expect(check).not.toHaveBeenCalled();
+        expect(await counts()).toEqual({ jobs: 0, sessions: 0, turns: 0 });
+      },
+    );
+
+    // #791
+    it("takes a name beside the existing ones", async () => {
+      const { h, service, body } = await startImplementerHarness();
+      h.fake.addPullRequest("acme/widgets", branch("feature/old"));
+      h.fake.addPullRequest("acme/widgets", { ...branch("feat"), number: 2 });
+
+      const started = await service.startTask(
+        USER,
+        body({ branch: "feature/new" }),
+      );
+
+      expect(started.created).toBe(true);
+    });
+
+    // #791: what the read cannot tell. The list is the first 100 names, so a conflict with a branch beyond them is found by
+    // git at the push, not here. A task whose session holds a name that is not on GitHub yet is not in the read either.
+    it("sees only the first 100 branches: a conflict beyond them is not found at submit", async () => {
+      const { h, service, body } = await startImplementerHarness();
+      const directory = mkdtempSync(join(tmpdir(), "cr-791-branches-"));
+      cleanUpAfterTest(async () => {
+        await Promise.resolve();
+        rmSync(directory, { recursive: true, force: true });
+      });
+      const git = createGitRepository(join(directory, "widgets"), {
+        defaultBranch: "main",
+      });
+      const base = git.commit({ "README.md": "base\n" }, "Base");
+      for (let n = 0; n < 120; n += 1)
+        git.setRef(`refs/heads/b${String(n).padStart(3, "0")}`, base);
+      h.fake.addGitRepository("acme/widgets", git.path);
+
+      // b005 is among the first 100 and found; b115 is beyond them.
+      expect(
+        await failureOf(service.startTask(USER, body({ branch: "b005/x" }))),
+      ).toMatchObject({ code: "IMPLEMENTER_BRANCH_CONFLICT" });
+      expect(
+        (await service.startTask(USER, body({ branch: "b115/x" }))).created,
+      ).toBe(true);
     });
   });
 

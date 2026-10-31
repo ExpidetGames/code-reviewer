@@ -33,6 +33,9 @@ const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 const LONE_SURROGATE =
   /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
+/** Every control character, tab and line breaks included: an id or a model name is one line. */
+const CONTROL_OR_NEWLINE = /[\u0000-\u001f\u007f]/;
+
 function isText(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
@@ -43,10 +46,13 @@ function readModel(value: unknown): ModelChoice | undefined {
     return undefined;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort().join(",");
+  // No control character (a NUL is refused by Postgres, and these fields reach queries) and a bounded length.
   const fits = (...fields: unknown[]) =>
     fields.every(
       (field) =>
-        isText(field) && (field as string).length <= MODEL_FIELD_MAX_LENGTH,
+        isText(field) &&
+        field.length <= MODEL_FIELD_MAX_LENGTH &&
+        !CONTROL_OR_NEWLINE.test(field),
     );
   if (keys === "entryId" && fits(record.entryId))
     return { entryId: record.entryId as string };
