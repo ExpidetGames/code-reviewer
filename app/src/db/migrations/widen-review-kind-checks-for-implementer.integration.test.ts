@@ -257,4 +257,99 @@ describe("the migration that widens the review kind checks", () => {
     },
     40_000,
   );
+
+  // #752 second review: the sweep of `no_capable_runner` asks for the jobs a runner claimed and ended, per kind, under the gate lock.
+  describe("the index for the jobs a runner ended", () => {
+    const INDEX = "jobs_ended_after_claim";
+    const indexOf = async (db: Kysely<Database>) =>
+      (
+        await sql<{
+          definition: string;
+        }>`select indexdef as definition from pg_indexes where tablename = 'jobs' and indexname = ${INDEX}`.execute(
+          db,
+        )
+      ).rows[0]?.definition;
+
+    // #752-T12
+    it("adds a partial index on the kind and the end of the jobs that were claimed, and the sweep's lookup can use it", async () => {
+      const { db } = await createEmptyTestDatabase();
+      await migrateToLatest(db, beforeThisMigration);
+      expect(await indexOf(db)).toBeUndefined();
+
+      await migrateToLatest(db, migrationProvider);
+
+      const definition = await indexOf(db);
+      expect(definition).toContain("(review_kind, finished_at)");
+      expect(definition).toContain("claimed_at IS NOT NULL");
+      const plan = await db.transaction().execute(async (trx) => {
+        await sql`set local enable_seqscan = off`.execute(trx);
+        return sql<{
+          "QUERY PLAN": string;
+        }>`explain select id from jobs where review_kind = 'dynamic' and claimed_at is not null and finished_at > ${T}`.execute(
+          trx,
+        );
+      });
+      expect(plan.rows.map((row) => row["QUERY PLAN"]).join("\n")).toContain(
+        INDEX,
+      );
+      await db.destroy();
+    });
+
+    // #752-T12
+    it("can be run again by hand, and `down` removes only that index", async () => {
+      const { db } = await createEmptyTestDatabase();
+      await migrateToLatest(db, migrationProvider);
+      const migrations = await migrationProvider.getMigrations();
+
+      await db.transaction().execute((trx) => migrations[WIDEN]!.up(trx));
+      expect(await indexOf(db)).toBeDefined();
+      await db.transaction().execute((trx) => migrations[WIDEN]!.down!(trx));
+
+      expect(await indexOf(db)).toBeUndefined();
+      await db.destroy();
+    });
+
+    // #752-T12
+    it("gives up with MIGRATION_FAILED and leaves neither the index nor the wider checks when a writer keeps jobs locked, then succeeds once it is gone", async () => {
+      const { db, url } = await createEmptyTestDatabase();
+      await migrateToLatest(db, beforeThisMigration);
+      await seedPreviousRelease(db);
+      const writer = connectPostgres(url, 1).db;
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let started: () => void = () => undefined;
+      const writing = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const writerDone = writer.transaction().execute(async (trx) => {
+        await sql`lock table jobs in row exclusive mode`.execute(trx);
+        started();
+        await held;
+      });
+      await writing;
+
+      const startedAt = Date.now();
+      await expect(
+        migrateToLatest(db, migrationProvider),
+      ).rejects.toMatchObject({ code: "MIGRATION_FAILED" });
+
+      expect(Date.now() - startedAt).toBeLessThan(20_000);
+      expect(await indexOf(db)).toBeUndefined();
+      expect(
+        (await constraintsOf(db, "usage_records")).find((check) =>
+          check.name.endsWith("review_kind_check"),
+        )?.definition,
+      ).not.toContain("implementer");
+      release();
+      await writerDone;
+      await expect(
+        migrateToLatest(db, migrationProvider),
+      ).resolves.toMatchObject({ executed: expect.arrayContaining([WIDEN]) });
+      expect(await indexOf(db)).toBeDefined();
+      await writer.destroy();
+      await db.destroy();
+    }, 40_000);
+  });
 });

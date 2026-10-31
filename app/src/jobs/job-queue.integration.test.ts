@@ -9,7 +9,10 @@ import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { SLOT_HOLDING_STATUSES } from "../db/job-status.ts";
 import { JobQueueError } from "./errors.ts";
-import { DEFAULT_NO_CAPABLE_RUNNER_MS } from "../db/job-limits.ts";
+import {
+  DEFAULT_NO_CAPABLE_RUNNER_MS,
+  type JobQueueLimits,
+} from "../db/job-limits.ts";
 import { createJobReviewSettingsHooks } from "./review-settings-hooks.ts";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
@@ -1738,10 +1741,10 @@ describe("a Dynamic job no capable runner can claim (#195)", () => {
     // A long run, so the hard timeout and the lease do not end the busy job before the cases below look.
     const limits = { leaseMs: 5 * HOUR, maxRuntimeMs: 5 * HOUR };
 
-    async function busyPool() {
+    async function busyPool(poolLimits: Partial<JobQueueLimits> = limits) {
       const fixture = await createJobQueueFixture({
         dynamicReview: true,
-        limits,
+        limits: poolLimits,
       });
       const running = await fixture.enqueueNew({ reviewKind: "dynamic" });
       fixture.clock.advance(1); // jobs are claimed oldest first
@@ -1848,6 +1851,82 @@ describe("a Dynamic job no capable runner can claim (#195)", () => {
       fixture.clock.advance(10 * MINUTE);
       expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
       expect((await fixture.queue.get(second.id))?.errorCode).toBe(
+        "no_capable_runner",
+      );
+    });
+
+    // A runner that stopped is no runner: the evidence is proof that one worked (#752 second review).
+    describe("when the busy runner stopped", () => {
+      const cancelledAtTheDeadline = async (
+        fixture: Awaited<ReturnType<typeof busyPool>>["fixture"],
+        waiting: { id: string },
+      ) => {
+        fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS);
+        expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+        expect(await fixture.queue.get(waiting.id)).toMatchObject({
+          status: "cancelled",
+          errorCode: "no_capable_runner",
+          attempts: 0,
+        });
+      };
+
+      it("cancels the waiting job at the deadline when the runner crashed and its lease lapsed (attempts left)", async () => {
+        // The default lease is 2 minutes and nobody heartbeats: the runner is gone.
+        const { fixture, waiting } = await busyPool({});
+
+        await cancelledAtTheDeadline(fixture, waiting);
+      });
+
+      it("cancels it at the deadline when the crashed job ended with lease_expired on its last attempt", async () => {
+        const { fixture, running, waiting } = await busyPool({
+          maxAttempts: 1,
+        });
+
+        await cancelledAtTheDeadline(fixture, waiting);
+        expect((await fixture.queue.get(running.id))?.errorCode).toBe(
+          "lease_expired",
+        );
+      });
+
+      it("cancels it at the deadline when the Worker hangs and the hard timeout ends its job", async () => {
+        // The lease is alive (5 hours), the job outlives the hard timeout (25 minutes): the same sweep reaps it first.
+        const { fixture, running, waiting } = await busyPool({
+          leaseMs: 5 * HOUR,
+        });
+
+        await cancelledAtTheDeadline(fixture, waiting);
+        expect((await fixture.queue.get(running.id))?.errorCode).toBe(
+          "timeout",
+        );
+      });
+
+      it("keeps counting a runner that reported a failure of its own: it worked", async () => {
+        const { fixture, running, waiting } = await busyPool();
+        fixture.clock.advance(10 * MINUTE);
+        await fixture.queue.complete(
+          running.id,
+          await fixture.tokenOf(running.id),
+          { ok: false, errorCode: "checkout_incomplete" },
+        );
+
+        fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS - 1 - 10 * MINUTE);
+        expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+        expect((await fixture.queue.get(waiting.id))?.status).toBe("queued");
+      });
+    });
+
+    // The deadline an operator sets may exceed the absolute limit: the job then goes at the deadline, neither earlier nor later.
+    it("cancels at an operator's deadline longer than 3 hours, not at 3 hours, with the pool busy", async () => {
+      const { fixture, waiting } = await busyPool({
+        ...limits,
+        noCapableRunnerMs: 4 * HOUR,
+      });
+
+      fixture.clock.advance(4 * HOUR - 1);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+      fixture.clock.advance(1);
+      expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+      expect((await fixture.queue.get(waiting.id))?.errorCode).toBe(
         "no_capable_runner",
       );
     });

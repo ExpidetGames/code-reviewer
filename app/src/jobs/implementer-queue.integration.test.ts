@@ -813,6 +813,28 @@ describe("the end of a turn without a report", () => {
     });
   });
 
+  // #752 second review: a turn whose runner crashed ended with lease_expired (never retried); that is no sign of a live pool.
+  it("cancels a waiting turn at the deadline when the turn before it was lost with its runner", async () => {
+    const t = await start();
+    const lost = await t.turn();
+    const waiting = await t.turn();
+    expect((await t.fixture.queue.claimNext("r", IMPLEMENTER))?.job.id).toBe(
+      lost.job.id,
+    );
+
+    t.fixture.clock.advance(30 * MINUTE);
+    expect((await t.fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+
+    expect(await t.fixture.queue.get(lost.job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "lease_expired",
+    });
+    expect(await t.fixture.queue.get(waiting.job.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "no_capable_runner",
+    });
+  });
+
   // #752 review
   it("cancels a turn at 3 hours although a turn of the pool still runs", async () => {
     const t = await start({

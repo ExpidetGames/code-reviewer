@@ -31,6 +31,8 @@ const USD = 1_000_000;
 
 async function start(
   options: {
+    /** The Dynamic Review rollout gate of the fixture's queue (default off). */
+    dynamicReview?: boolean;
     adapter?: BillingAdapter | undefined;
     /** Stands in for the start credit; gets the database, the workspace and the clock. */
     startCredit?: (context: {
@@ -40,7 +42,9 @@ async function start(
     }) => Promise<unknown>;
   } = {},
 ) {
-  const fixture = await createJobQueueFixture();
+  const fixture = await createJobQueueFixture(
+    options.dynamicReview === true ? { dynamicReview: true } : {},
+  );
   const { db, workspaceId } = fixture;
   await setBillingSwitch(db, true);
   const adapter =
@@ -435,7 +439,7 @@ describe("the billing page data of a workspace", () => {
 
   // #752 review: a turn of the Implementer has no pull request, so its negative placeholder number is never shown.
   it("names the charge of a turn of the Implementer by its branch, and leaves the labels of Diff and Dynamic rows as they were", async () => {
-    const t = await start();
+    const t = await start({ dynamicReview: true });
     await fundWorkspace(t.db, t.workspaceId, 50 * USD, t.fixture.clock.now);
     await addUser(t.db, "user-1");
     const capable = createCapabilitySet([
@@ -448,6 +452,11 @@ describe("the billing page data of a workspace", () => {
       kindAllowed: (kind) => capable.allowsReviewKind(kind),
     });
     const diff = await t.fixture.enqueueNew({ prNumber: 7 });
+    const dynamic = await t.fixture.enqueueNew({
+      prNumber: 9,
+      headSha: sha("c"),
+      reviewKind: "dynamic",
+    });
     const turn = await queue.enqueueImplementerTurn({
       repositoryId: t.fixture.repositoryId,
       baseBranch: "main",
@@ -467,12 +476,19 @@ describe("the billing page data of a workspace", () => {
       t.fixture.clock.now,
     );
     await records.reserve(diff.id, "managed");
+    await records.reserve(dynamic.id, "managed");
     await records.reserve(turn.job.id, "managed");
     await t.journal().charge(diff.id, {
       aiMicroUsd: 1 * USD,
       infraMicroUsd: 100_000,
       minutes: 1,
       reviewKind: "diff",
+    });
+    await t.journal().charge(dynamic.id, {
+      aiMicroUsd: 1 * USD,
+      infraMicroUsd: 100_000,
+      minutes: 1,
+      reviewKind: "dynamic",
     });
     await t.journal().charge(turn.job.id, {
       aiMicroUsd: 2 * USD,
@@ -486,7 +502,7 @@ describe("the billing page data of a workspace", () => {
     const labels = view.journal.rows.flatMap((row) =>
       row.run === null ? [] : [row.run.label],
     );
-    expect(labels).toHaveLength(2);
+    expect(labels).toHaveLength(3);
     expect(labels).toContainEqual(
       expect.stringMatching(
         /^acme\/(widgets|gadgets) implementer\/add-health$/,
@@ -494,6 +510,9 @@ describe("the billing page data of a workspace", () => {
     );
     expect(labels).toContainEqual(
       expect.stringMatching(/^acme\/(widgets|gadgets) #7$/),
+    );
+    expect(labels).toContainEqual(
+      expect.stringMatching(/^acme\/(widgets|gadgets) #9$/),
     );
     expect(labels.join(" ")).not.toContain("#-");
   });

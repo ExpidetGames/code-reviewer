@@ -26,7 +26,7 @@ export const DEFAULT_NO_CAPABLE_RUNNER_MS = 30 * 60 * 1000;
 /**
  * #752: the deadline above is waived while a runner of the same engine is busy (a job of the kind runs or ended within it), because a
  * busy pool is not "no capable runner". This is the absolute limit: a queued job older than it is cancelled with
- * `no_capable_runner` whatever the pool does, so no job waits forever behind a pool that never frees up. Not shorter than the deadline.
+ * `no_capable_runner` whatever the pool does, so no job waits forever behind a pool that never frees up. An operator's deadline longer than this wins: the job then goes at the deadline.
  */
 export const DEFAULT_NO_CAPABLE_RUNNER_ABSOLUTE_MS = 3 * 60 * 60 * 1000;
 

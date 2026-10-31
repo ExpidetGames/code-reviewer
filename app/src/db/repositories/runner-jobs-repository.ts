@@ -298,6 +298,17 @@ function runningWhere(scope: RunningScope) {
     ]);
 }
 
+/**
+ * The codes with which `expire` ends a claimed job without any word from its runner: the lease ran out, the runtime passed the
+ * hard limit, the command was removed. A job that ended with one of them is no proof that a runner worked (#752), unlike a job the
+ * runner finished or failed itself.
+ */
+const REAPER_ERROR_CODES = [
+  "lease_expired",
+  "timeout",
+  "command_removed",
+] as const satisfies readonly JobErrorCode[];
+
 /** A start credit a claim granted: logged after the claim committed (#507). */
 type GrantedStartCredit = { workspaceId: string; amountMicroUsd: number };
 
@@ -539,9 +550,11 @@ export function createRunnerJobsRepository(
    * credential. The deadline is operator-owned (`noCapableRunnerMs`).
    *
    * #752 review: the code says there is no capable runner, so a busy one must not trigger it. A job of the same kind that is
-   * running, or that a runner claimed and ended within the deadline, shows the pool of that engine is alive; the queue then keeps the job
-   * until the absolute limit (`noCapableRunnerAbsoluteMs`, never shorter than the deadline). Every job of this database counts, whatever
-   * its workspace: the runner pool is shared. A job that ended without a claim (`claimed_at` is null), such as one cancelled here, is no sign.
+   * running, or that a runner claimed and ended itself within the deadline, shows the pool of that engine is alive; the queue then keeps the
+   * job until the absolute limit (`noCapableRunnerAbsoluteMs`). Every job of this database counts, whatever its workspace: the runner
+   * pool is shared. What is no sign of a runner: a job that ended without a claim (`claimed_at` is null, such as one cancelled here), a
+   * job the reaper ended (`REAPER_ERROR_CODES`), and a `running` row whose lease or runtime is spent, which is why `expire` runs this pass
+   * after `loseAttempt` and `failTimedOut`. An operator's deadline longer than the absolute limit wins: the job goes at the deadline.
    */
   async function cancelStrandedDynamic(
     executor: Kysely<Database>,
@@ -552,10 +565,7 @@ export function createRunnerJobsRepository(
       new Date(current.getTime() - limits.noCapableRunnerMs),
     );
     const absoluteBefore = formatTimestamp(
-      new Date(
-        current.getTime() -
-          Math.max(limits.noCapableRunnerAbsoluteMs, limits.noCapableRunnerMs),
-      ),
+      new Date(current.getTime() - limits.noCapableRunnerAbsoluteMs),
     );
     const result = await executor
       .updateTable("jobs")
@@ -585,10 +595,18 @@ export function createRunnerJobsRepository(
                 .whereRef("served.review_kind", "=", "jobs.review_kind")
                 .where((served) =>
                   served.or([
+                    // Running: the passes of `expire` ran before, so a lapsed lease or a spent runtime is not `running` any more.
                     served("served.status", "=", "running"),
+                    // Ended after a claim, through the runner: a job the reaper ended says nothing about a runner.
                     served.and([
                       served("served.claimed_at", "is not", null),
                       served("served.finished_at", ">", strandedBefore),
+                      served.or([
+                        served("served.error_code", "is", null),
+                        served("served.error_code", "not in", [
+                          ...REAPER_ERROR_CODES,
+                        ]),
+                      ]),
                     ]),
                   ]),
                 ),
@@ -657,8 +675,6 @@ export function createRunnerJobsRepository(
     // migration (a race); a running one was claimed before the upgrade. They are cancelled here so
     // they can neither starve review jobs nor be requeued.
     await cancelRemovedCommands(executor, timestamp);
-    // A Dynamic job no runner can run must not wait forever (#195).
-    const noCapableRunner = await cancelStrandedDynamic(executor, current);
     const lost = await loseAttempt(
       executor,
       { leaseExpiredBefore: timestamp },
@@ -668,6 +684,9 @@ export function createRunnerJobsRepository(
     // A job whose runner keeps the lease alive but never finishes. Lost leases come first: a job
     // whose runner vanished long ago is retried, not failed for taking long.
     const timedOut = await failTimedOut(executor, {}, current);
+    // A Dynamic job no runner can run must not wait forever (#195). After the two passes above on purpose (#752): a row whose
+    // lease lapsed or whose runtime ran out is not `running` any more, so it is no sign of a live runner here.
+    const noCapableRunner = await cancelStrandedDynamic(executor, current);
     unknownCost.push(...(await closeRecordsOfEndedJobs(executor, timestamp)));
     // Only the jobs that are over: one that went back to the queue gets a new claim, and its VM must not be stopped.
     if (expiring.length > 0)
