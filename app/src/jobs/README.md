@@ -151,8 +151,7 @@ What differs from a review, and why a consumer that assumes a pull request is ga
 - **Pull request consumers.** `cancelWaiting` (project deactivated, review kind changed, pull request closed, draft) never touches the
   kind. `previousReviewedSha` and `attemptedShas` answer nothing for it. The check run reconciler and its sweep skip it (it would
   otherwise fill the sweep's batch for good). A claim refused for the entitlements fails the turn with the code and tells the refusal
-  hook its kind; the notice on a pull request is not made for it. The claim of the runner API refuses the kind until its input is
-  built (#753).
+  hook its kind; the notice on a pull request is not made for it. The claim of the runner API builds its input from the turn's record (#753).
 - **Usage and billing.** The record is reserved at claim with the kind `implementer` (billing off and on). For the plan's run limits,
   the rate of a minute and the model catalog it counts and costs as `dynamic` (`projectKindOf`), the engine it runs on; the journal
   entry keeps its own kind. The checks on `usage_records.review_kind` and `billing_journal_entries.review_kind` take the value

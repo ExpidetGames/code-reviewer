@@ -34,6 +34,11 @@ export const INTEGRATION_ERROR_CODES = [
    */
   "INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED",
   /**
+   * The deployment does not have the capability the call needs (#753): the token of the Implementer is made in a
+   * deployment with `implementer` only. Nothing was asked of the platform. Nobody retries it.
+   */
+  "INTEGRATION_CAPABILITY_ABSENT",
+  /**
    * The platform understood the call and refused it for its content (GitHub: a 422 on the call itself, for
    * example a review of the app's own pull request). Trying the same call again does not help.
    */

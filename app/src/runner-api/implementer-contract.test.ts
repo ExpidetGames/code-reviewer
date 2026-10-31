@@ -460,17 +460,20 @@ describe("a job of the implementer kind in the claim", () => {
     ).toStrictEqual(["diff", "dynamic", "implementer"]);
   });
 
-  // #746-T07
-  it("has a refusal with a stable code for the kind and none for the kinds the claim builds", () => {
-    expect(refusalForKind("implementer")).toBe(
+  // #746-T07, #753
+  it("has a refusal with a stable code for a caller that did not advertise the engine, and none for the kinds it can run", () => {
+    expect(refusalForKind("implementer", ["pr-agent", "opencode"])).toBe(
       "implementer_engine_unavailable",
     );
-    expect(refusalForKind("diff")).toBeNull();
-    expect(refusalForKind("dynamic")).toBeNull();
+    expect(refusalForKind("implementer", ["implementer"])).toBeNull();
+    // The Worker's fetch: the claim already decided who may have the job.
+    expect(refusalForKind("implementer", null)).toBeNull();
+    expect(refusalForKind("diff", ["pr-agent"])).toBeNull();
+    expect(refusalForKind("dynamic", ["pr-agent"])).toBeNull();
   });
 
-  // #746-T07
-  it("is refused by checkJob before anything else looks at it, never built as a Diff job", async () => {
+  // #746-T07, #753
+  it("is refused by checkJob for a caller without the engine before anything else looks at it, never built as a Diff job", async () => {
     // No dependency is given: the refusal comes first, so none may be touched.
     const untouched = new Proxy(
       {},
@@ -480,10 +483,12 @@ describe("a job of the implementer kind in the claim", () => {
         },
       },
     ) as ClaimDeps;
-    // The job row type does not know the kind before the queue gains it (#752).
     const job = { id: "job-1", reviewKind: "implementer" } as unknown as Job;
 
-    const checked = await checkJob(untouched, job, options);
+    const checked = await checkJob(untouched, job, {
+      ...options,
+      engines: ["pr-agent", "opencode"],
+    });
 
     expect(checked).toMatchObject({
       kind: "refused",

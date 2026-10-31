@@ -191,12 +191,26 @@ export interface IntegrationProvider {
    * Credentials for one Implementer turn on one repository (#749): like `jobAccess`, a fresh token limited to exactly
    * this repository, but with the right to write its contents (push a branch) and nothing else. Never used by a review
    * job. Rejects with an `IntegrationError` like `jobAccess`; `INTEGRATION_ACCESS_PERMISSION_NOT_GRANTED` says the
-   * connection has not accepted the write permission yet (not retryable).
+   * connection has not accepted the write permission yet (not retryable). It is a capability of its own (#753): a
+   * deployment without `implementer` is refused with `INTEGRATION_CAPABILITY_ABSENT` before the platform is asked
+   * anything, whatever the App was set to by hand. A token lives up to an hour; `revokeImplementerAccess` ends it.
    */
   implementerAccess(
     integration: Integration,
     repo: RepoRef,
   ): Promise<GitAccess>;
+
+  /**
+   * Switches off a token `implementerAccess` handed out (#753), so a write token does not outlive its job: called when the
+   * token never reached a Worker, and when the turn is over. Idempotent, never rejects, and not behind the capability, because
+   * a cleanup is never refused. Answers whether the token is off: `true` when the platform switched it off or says it is not
+   * valid any more; `false` when that is not known (an error, a rate limit, no answer in time), and the caller keeps the token and
+   * tries again until it expires. `token` is the value `implementerAccess` returned.
+   */
+  revokeImplementerAccess(
+    integration: Integration,
+    token: string,
+  ): Promise<boolean>;
 
   /**
    * What the connection has accepted on the platform (#749), so that a page can say "write access not granted" before a
