@@ -48,6 +48,29 @@ EXAMPLE = ROOT / "contracts" / "examples" / "implementer" / "RunnerJobInput.json
 INSTRUCTION = "Add a greeting file and commit it."
 
 
+# A provider of the catalog (not the registry's) for each wire the fakes speak; the key goes to the
+# address of the entry only. Messages and chat are the registry providers of `native_full_job`.
+FAMILY_ENTRIES: dict[Family, dict[str, Any]] = {
+    **ENTRIES,
+    "responses": {
+        "provider": "acme-resp",
+        "npm": "@ai-sdk/openai",
+        "family": "openai-responses",
+        "authHeader": "Authorization",
+        "upstreamBaseUrl": "https://api.acme-resp.example/v1",
+        "model": "acme-resp-9",
+    },
+    "google": {
+        "provider": "acme-gemini",
+        "npm": "@ai-sdk/google",
+        "family": "google",
+        "authHeader": "x-goog-api-key",
+        "upstreamBaseUrl": "https://generativelanguage.acme-gemini.example/v1beta",
+        "model": "acme-gemini-9",
+    },
+}
+
+
 def implementer_job(
     family: Family,
     cost: Mapping[str, Any] = MANAGED,
@@ -61,7 +84,7 @@ def implementer_job(
 ) -> ImplementerInput:
     """The contract's example job with the provider, model and cost policy of the test."""
     document: dict[str, Any] = json.loads(EXAMPLE.read_text(encoding="utf-8"))
-    entry = ENTRIES[family] if entry is None else entry
+    entry = FAMILY_ENTRIES[family] if entry is None else entry
     spec = document["implementer"]
     spec["instruction"] = instruction
     spec["limits"]["timeLimitSeconds"] = time_limit
@@ -80,7 +103,9 @@ def implementer_job(
     model_entry["model"].pop("interleaved", None)
     document["git"]["token"] = TOKEN
     document["llm"] = {
-        "provider": entry["provider"],
+        "provider": entry["provider"].replace(
+            "-", "_"
+        ),  # the slug of the key, not the id of the entry
         "model": entry["model"],
         "apiKey": REAL_KEY,
         **({} if max_cost_usd is None else {"maxCostUsd": max_cost_usd}),
@@ -187,7 +212,7 @@ def implementer_turn(
         raw("push", "-q", "origin", "main", cwd=rig.origin.seed, git=git)
     workspace = rig.prepared()
     scene = Scene()
-    entry = ENTRIES[family] if entry is None else entry
+    entry = FAMILY_ENTRIES[family] if entry is None else entry
     job = implementer_job(
         family,
         cost,

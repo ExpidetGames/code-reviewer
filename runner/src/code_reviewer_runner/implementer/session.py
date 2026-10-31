@@ -40,6 +40,7 @@ from code_reviewer_runner.dynamic_review.adapter import (
 )
 from code_reviewer_runner.dynamic_review.budget import (
     MAX_REQUEST_BYTES,
+    BudgetLedger,
     DynamicLimits,
     LimitError,
 )
@@ -290,6 +291,11 @@ class ImplementerSession:
         self._session_id: str | None = None
         self._native: NativeJob | None = None
         self._pushed: PushResult | None = None
+
+    @property
+    def ledger(self) -> BudgetLedger | None:
+        """The ledger of the turn (None before it was made): its limits are a fact tests pin."""
+        return None if self._native is None else self._native.ledger
 
     # -- the limits -----------------------------------------------------------
 

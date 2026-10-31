@@ -8,6 +8,7 @@ the push loop and the leftover handling. The user separation is proven by the pr
 """
 
 import contextlib
+import itertools
 import json
 import socket
 import threading
@@ -20,7 +21,7 @@ import pytest
 from fake_llm import real_anthropic_usage
 from fakes.llm.anthropic_cache import PromptCache
 from fakes.wire import formats
-from fakes.wire.formats import Turn, Usage
+from fakes.wire.formats import Family, Turn, Usage
 from fakes.wire.formats import usage_for as real_usage_for
 from implementer_support import (
     BRANCH,
@@ -186,6 +187,10 @@ def test_the_time_limit_stops_the_agent_and_the_leftover_is_committed_and_pushed
         result = turned.result
 
         assert result.error_code is ErrorCode.TIME_LIMIT_REACHED, result.notes
+        # The clock the ledger was given keeps the last three minutes of the job's hour back.
+        ledger = turned.session.ledger
+        assert ledger is not None
+        assert 3600 - 180 - 60 < ledger.limits.deadline_seconds <= 3600 - 180
         assert [c.subject for c in result.commits] == [LEFTOVER_MESSAGE]
         assert result.pushed and turned.origin_tip() == result.head_commit
         assert len(turned.requests) < 40
@@ -809,3 +814,111 @@ def test_nothing_executable_or_configurable_is_loaded_from_the_repository(tmp_pa
             assert kept in tree.splitlines()
         assert not (turned.workspace.repo / ".opencode").exists()
         assert not (turned.workspace.repo / "opencode.json").exists()
+
+
+FAMILIES: dict[Family, WireFamily] = {
+    "messages": WireFamily.ANTHROPIC_MESSAGES,
+    "chat": WireFamily.OPENAI_CHAT,
+    "responses": WireFamily.OPENAI_RESPONSES,
+    "google": WireFamily.GOOGLE,
+}
+
+
+def strip_marks(value: Any) -> Any:
+    """A request item without the cache marks, which move from one request to the next."""
+    if isinstance(value, dict):
+        document = cast("dict[str, Any]", value)
+        return {key: strip_marks(item) for key, item in document.items() if key != "cache_control"}
+    if isinstance(value, list):
+        items = [strip_marks(item) for item in cast("list[Any]", value)]
+        # A message with one text block is the same message as its bare text (the chat wire writes
+        # the block only where it carries a mark).
+        if len(items) == 1 and isinstance(items[0], dict):
+            only = cast("dict[str, Any]", items[0])
+            if set(only) == {"type", "text"} and only["type"] == "text":
+                return only["text"]
+        return items
+    return value
+
+
+def history_of(family: Family, body: dict[str, Any]) -> list[Any]:
+    key = {"messages": "messages", "chat": "messages", "responses": "input", "google": "contents"}
+    return cast("list[Any]", strip_marks(body[key[family]]))
+
+
+def preamble_of(family: Family, body: dict[str, Any]) -> str:
+    """What stands before the conversation: the system text and the tools."""
+    keys = ("system", "instructions", "systemInstruction", "tools")
+    text = json.dumps(strip_marks({key: body.get(key) for key in keys}), sort_keys=True)
+    if family == "chat":  # the system text is the first message of the history there
+        return text
+    return text
+
+
+# #764-R10
+@pytest.mark.parametrize("family", sorted(FAMILIES))
+def test_prompt_caching_holds_for_every_family_the_requests_extend_each_other_and_cost_is_right(
+    tmp_path: Path, family: Family
+) -> None:
+    def script(repo: Path) -> list[Turn]:
+        return [
+            write_file(repo, "a.txt"),
+            bash("cat a.txt"),
+            commit("Add a"),
+            says("done"),
+        ]
+
+    with implementer_turn(tmp_path, script, family=family) as turned:
+        result = turned.result
+        assert result.ok, (result.error_code, result.error_detail, result.notes)
+        bodies = turned.requests
+        assert len(bodies) == 4
+
+        # Automatic caching (OpenAI, Gemini, DeepSeek) and marked caching (Claude) both need the
+        # prefix of a request to be the whole of the one before: the history only grows, and the
+        # system text and the tools do not change.
+        histories = [history_of(family, body) for body in bodies]
+        for earlier, later in itertools.pairwise(histories):
+            assert later[: len(earlier)] == earlier, "a request is not an extension of the last"
+            assert len(later) > len(earlier)
+        assert len({preamble_of(family, body) for body in bodies}) == 1
+
+        # Where the provider is told where to cache (Claude), the engine's marks reach it as
+        # written, on every call: nothing of the runner removes them.
+        if family in ("messages", "chat"):
+            for body in bodies:
+                assert '"cache_control"' in json.dumps(body)
+        if family == "messages":
+            cache = PromptCache()
+            usages = [
+                cache.usage(body, real_anthropic_usage(output_tokens=10), minimum=256)
+                for body in bodies
+            ]
+            reads = [usage["cache_read_input_tokens"] for usage in usages]
+            assert (
+                reads[0] == 0 and all(later > 0 for later in reads[1:]) and reads == sorted(reads)
+            )
+
+        # What the provider states about its cache is counted and priced as the book says.
+        total = Fraction(0)
+        prompt = 0
+        tool_calls = 0
+        for position, record in enumerate(turned.upstream.records, start=1):
+            has_tools = turned.carries_tools(record.body)
+            tool_calls += 1 if has_tools else 0
+            stated = usage_expected(tool_calls if has_tools else 100 + position, FAMILIES[family])
+            prompt += stated.prompt_tokens
+            cost = expected_cost(
+                BOOK,
+                prompt=stated.prompt_tokens,
+                completion=stated.completion_tokens,
+                read=stated.cache_read,
+                write_5m=stated.cache_write_5m,
+                write_1h=stated.cache_write_1h,
+                reasoning=stated.reasoning_tokens,
+            )
+            assert cost is not None
+            total += cost
+        assert result.usage.ai_calls == len(turned.upstream.records)
+        assert result.usage.prompt_tokens == prompt
+        assert result.usage.cost_usd == pytest.approx(float(total), rel=1e-9)

@@ -454,7 +454,7 @@ class GitWorkspace:
             ["config", "user.name", self.identity.name],
             ["config", "user.email", self.identity.email],
             ["config", "commit.gpgsign", "false"],
-            # What the engine would load from the working tree stays out of it (see `ENGINE_INPUTS`).
+            # What the engine would load from the working tree stays out (see `ENGINE_INPUTS`).
             ["sparse-checkout", "set", "--no-cone", "/*", *(f"!/{name}" for name in ENGINE_INPUTS)],
             ["checkout", "-q", "-b", self.spec.branch],
         )
